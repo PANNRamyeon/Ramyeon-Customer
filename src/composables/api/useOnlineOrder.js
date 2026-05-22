@@ -1,7 +1,7 @@
 // useOnlineOrder Composable
 // Provides comprehensive online order management with promotions, loyalty points, and stock validation
 import { ref, computed, watch } from 'vue'
-import { ordersAPI } from '@/services/api.js'
+import { ordersAPI, loyaltyAPI } from '@/services/api.js'
 import { usePromotions } from './usePromotions.js'
 import { useLoyalty } from './useLoyalty.js'
 import { useProducts } from './useProducts.js'
@@ -425,7 +425,22 @@ export function useOnlineOrder() {
             description: `Points earned from order #${result.data.order_number}`
           })
         }
-        
+
+        // Redeem loyalty points if the customer chose to use them
+        const pointsToRedeem = orderData.points_to_redeem || orderData.loyalty_points || 0
+        const customerId = orderData.customer_id || orderData.user?.id
+        if (pointsToRedeem > 0 && customerId) {
+          try {
+            await loyaltyAPI.redeem(
+              customerId,
+              pointsToRedeem,
+              `Redeemed for order #${result.data.order_number || result.data.id}`
+            )
+          } catch (redeemErr) {
+            console.warn('⚠️ Points redemption failed, but order was created:', redeemErr.message)
+          }
+        }
+
         console.log('✅ Order created successfully')
         return { success: true, data: result.data }
       } else {

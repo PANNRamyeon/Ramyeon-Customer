@@ -36,9 +36,35 @@
             <button class="promotions-btn" @click="$emit('setCurrentPage', 'Promotions')">
               🎁 Browse Promotions
             </button>
-        <!--  <button class="points-history-btn" @click="showPointsHistory">
-              📊 Points History
-            </button>-->  
+            <button
+              class="redeem-btn"
+              :disabled="!canRedeem"
+              @click="showRedeemPanel = !showRedeemPanel"
+            >
+              🎟️ Redeem Points
+            </button>
+          </div>
+
+          <div v-if="showRedeemPanel" class="redeem-panel">
+            <div class="redeem-header">Use Points at Checkout</div>
+            <div class="redeem-slider-row">
+              <input
+                type="range"
+                v-model.number="pointsToRedeem"
+                :min="40"
+                :max="maxRedeemPoints"
+                step="4"
+                class="redeem-slider"
+              />
+              <span class="redeem-points-label">{{ pointsToRedeem }} pts</span>
+            </div>
+            <div class="redeem-discount-preview">= ₱{{ redeemDiscount }} discount at checkout</div>
+            <div class="redeem-actions">
+              <button class="redeem-confirm-btn" @click="redeemLoyaltyPoints">
+                Apply at Checkout
+              </button>
+              <button class="redeem-cancel-btn" @click="showRedeemPanel = false">Cancel</button>
+            </div>
           </div>
 
           <div class="points-info">
@@ -178,7 +204,11 @@ export default {
       selectedVoucher: {},
       showAllVouchersFlag: false,
       isDarkMode: false,
-      avatarHover: false
+      avatarHover: false,
+
+      customerId: null,
+      showRedeemPanel: false,
+      pointsToRedeem: 40
     }
   },
 
@@ -187,6 +217,15 @@ export default {
       return this.showAllVouchersFlag
         ? this.user.vouchers
         : this.user.vouchers.slice(0, 2)
+    },
+    canRedeem() {
+      return (this.user.loyalty_points || 0) >= 40
+    },
+    maxRedeemPoints() {
+      return Math.min(this.user.loyalty_points || 0, 80)
+    },
+    redeemDiscount() {
+      return (this.pointsToRedeem / 4).toFixed(2)
     }
   },
 
@@ -240,6 +279,21 @@ export default {
       setTimeout(() => {
         this.$emit('setCurrentPage', 'Cart')
       }, 1500)
+    },
+
+    // -----------------------------
+    // LOYALTY REDEMPTION
+    // -----------------------------
+    redeemLoyaltyPoints() {
+      localStorage.setItem('ramyeon_use_loyalty_points', JSON.stringify({
+        points: this.pointsToRedeem,
+        setAt: new Date().toISOString()
+      }))
+      this.showRedeemPanel = false
+      this.showSuccessMessage(`${this.pointsToRedeem} points queued! Redirecting to cart...`)
+      setTimeout(() => {
+        this.$emit('setCurrentPage', 'Cart')
+      }, 1200)
     },
 
     // -----------------------------
@@ -298,6 +352,7 @@ export default {
         const first = user.first_name || user.firstName || (user.full_name?.split(' ')[0])
         const last = user.last_name || user.lastName || (user.full_name?.split(' ').slice(1).join(' ') || '')
 
+        this.customerId = user.customer_id || user.id || null
         this.user = {
           ...this.user,
           firstName: first || this.user.firstName,
@@ -637,6 +692,110 @@ export default {
   font-weight: 500;
   color: #bf360c;
   font-size: 0.9rem;
+}
+
+.redeem-btn {
+  flex: 1;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 0.95rem;
+  background: linear-gradient(135deg, #ff9800, #f57c00);
+  color: white;
+}
+
+.redeem-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #f57c00, #ef6c00);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 152, 0, 0.3);
+}
+
+.redeem-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.redeem-panel {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 152, 0, 0.3);
+  border-radius: 14px;
+  padding: 18px;
+  margin-top: 16px;
+}
+
+.redeem-header {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #e65100;
+  margin-bottom: 14px;
+}
+
+.redeem-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.redeem-slider {
+  flex: 1;
+  accent-color: #ff9800;
+}
+
+.redeem-points-label {
+  font-weight: 700;
+  color: #e65100;
+  min-width: 60px;
+  text-align: right;
+}
+
+.redeem-discount-preview {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #388e3c;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.redeem-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.redeem-confirm-btn {
+  flex: 2;
+  padding: 10px;
+  background: linear-gradient(135deg, #28a745, #20c997);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.redeem-confirm-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.redeem-cancel-btn {
+  flex: 1;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.08);
+  color: #555;
+  border: none;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.redeem-cancel-btn:hover {
+  background: rgba(0, 0, 0, 0.14);
 }
 
 /* Smooth hover effect */

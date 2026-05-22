@@ -4,36 +4,9 @@ import axios from 'axios';
 // ---------------------------------------------------------------------------
 // Resolve API Base URL
 // ---------------------------------------------------------------------------
-let API_BASE_URL =
-  // Vue CLI
-  (typeof process !== 'undefined' && process.env && (
-    process.env.VUE_APP_API_URL ||
-    process.env.VITE_API_URL
-  )) ||
+const API_BASE_URL = process.env.VUE_APP_API_URL || 'https://pann-pos.onrender.com/api/v1';
 
-  // Vite
-  (typeof import.meta !== 'undefined' && import.meta.env && (
-    import.meta.env.VITE_API_URL ||
-    import.meta.env.VITE_API_BASE_URL ||
-    import.meta.env.VUE_APP_API_URL
-  )) ||
-
-  // Default to production API
-  'https://pann-pos.onrender.com/api/v1';
-
-// Guard for invalid paths
-if (!API_BASE_URL || (API_BASE_URL.startsWith('/'))) {
-  API_BASE_URL = 'https://pann-pos.onrender.com/api/v1';
-}
-
-// Debug log
-try {
-  if (typeof window !== 'undefined') {
-    console.log('[API] Resolved Base URL:', API_BASE_URL);
-  }
-} catch (err) {
-  console.warn('[API] Failed to log base URL:', err);
-}
+console.log('[API] Resolved Base URL:', API_BASE_URL);
 
 // Export base URL
 export const apiBaseUrl = API_BASE_URL;
@@ -45,6 +18,7 @@ export const apiBaseUrl = API_BASE_URL;
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
+  timeout: 15000,
 });
 
 // ---------------------------------------------------------------------------
@@ -63,6 +37,76 @@ apiClient.interceptors.request.use(
     return config;
   },
   (error) => Promise.reject(error)
+);
+
+// ---------------------------------------------------------------------------
+// Interceptor: Token Refresh on 401
+// ---------------------------------------------------------------------------
+let isRefreshing = false;
+let refreshQueue = [];
+
+const processRefreshQueue = (error, token = null) => {
+  refreshQueue.forEach(({ resolve, reject }) => error ? reject(error) : resolve(token));
+  refreshQueue = [];
+};
+
+const clearLocalAuth = () => {
+  localStorage.removeItem('access_token');
+  localStorage.removeItem('refresh_token');
+  localStorage.removeItem('ramyeon_user_session');
+};
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+
+    if (error.response?.status !== 401 || originalRequest._retry) {
+      return Promise.reject(error);
+    }
+
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (!refreshToken) {
+      clearLocalAuth();
+      return Promise.reject(error);
+    }
+
+    if (isRefreshing) {
+      return new Promise((resolve, reject) => {
+        refreshQueue.push({ resolve, reject });
+      }).then((token) => {
+        originalRequest.headers.Authorization = `Bearer ${token}`;
+        return apiClient(originalRequest);
+      });
+    }
+
+    originalRequest._retry = true;
+    isRefreshing = true;
+
+    try {
+      const res = await axios.post(`${API_BASE_URL}/auth/token/refresh/`, {
+        refresh: refreshToken,
+      });
+
+      const newAccessToken = res.data.access || res.data.access_token;
+      const newRefreshToken = res.data.refresh || res.data.refresh_token;
+
+      localStorage.setItem('access_token', newAccessToken);
+      if (newRefreshToken) localStorage.setItem('refresh_token', newRefreshToken);
+
+      apiClient.defaults.headers.common.Authorization = `Bearer ${newAccessToken}`;
+      processRefreshQueue(null, newAccessToken);
+
+      originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+      return apiClient(originalRequest);
+    } catch (refreshError) {
+      processRefreshQueue(refreshError, null);
+      clearLocalAuth();
+      return Promise.reject(refreshError);
+    } finally {
+      isRefreshing = false;
+    }
+  }
 );
 
 // ============================================================================
@@ -103,6 +147,21 @@ export const authAPI = {
       console.error('[API] Login error:', error.response?.data);
       throw error.response?.data || { error: 'Login failed' };
     }
+  },
+
+  // Refresh access token manually
+  refreshToken: async () => {
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (!refreshToken) throw new Error('No refresh token available');
+
+    const res = await axios.post(`${API_BASE_URL}/auth/token/refresh/`, { refresh: refreshToken });
+    const newAccessToken = res.data.access || res.data.access_token;
+    const newRefreshToken = res.data.refresh || res.data.refresh_token;
+
+    localStorage.setItem('access_token', newAccessToken);
+    if (newRefreshToken) localStorage.setItem('refresh_token', newRefreshToken);
+
+    return newAccessToken;
   },
 
   // Logout
@@ -280,7 +339,7 @@ export const ordersAPI = {
       }
 
       // Call the backend endpoint
-      const response = await apiClient.get(`/online-orders/customer/${customerId}/`, {
+      const response = await apiClient.get(`/pos/orders/online/customer/${customerId}/`, {
         params: { limit, offset }
       });
 
@@ -332,7 +391,7 @@ export const ordersAPI = {
         special_instructions: orderData?.special_instructions || orderData?.notes || '',
       };
 
-      const response = await apiClient.post('/online-orders/', payload);
+      const response = await apiClient.post('/pos/orders/online/create/', payload);
       
       // Backend returns { success: true, data: {...} } or { success: false, error: "..." }
       if (response.data && response.data.success) {
@@ -357,7 +416,7 @@ export const ordersAPI = {
   // -------------------------------------------------------------------------
   getById: async (id) => {
     try {
-      const response = await apiClient.get(`/sales/get/${id}/`);
+      const response = await apiClient.get(`/pos/orders/online/${id}/`);
       return response.data;
     } catch (error) {
       // fallback: localStorage lookup
@@ -381,7 +440,7 @@ export const ordersAPI = {
         return { success: false, error: 'Not authenticated' };
       }
 
-      const response = await apiClient.get(`/online/orders/${orderId}/status/`);
+      const response = await apiClient.get(`/pos/orders/online/${orderId}/`);
       return { success: true, ...response.data };
 
     } catch (error) {
@@ -409,7 +468,7 @@ export const ordersAPI = {
   // -------------------------------------------------------------------------
   updateStatus: async (orderId, newStatus, notes = '') => {
     try {
-      const res = await apiClient.post(`/online-orders/${orderId}/status/`, {
+      const res = await apiClient.post(`/pos/orders/${orderId}/status/`, {
         status: newStatus,
         notes: notes
       });
@@ -510,6 +569,18 @@ export const loyaltyAPI = {
     } catch (error) {
       console.error('[LOYALTY] calculatePointsEarned error:', error);
       return { success: false, error: error.message || 'Failed to calculate points earned' };
+    }
+  },
+
+  // Redeem loyalty points against a customer's account
+  redeem: async (customerId, points, reason = 'Points redemption') => {
+    try {
+      const response = await apiClient.post(`/admin/customers/${customerId}/loyalty/redeem/`, { points, reason });
+      return { success: true, ...response.data };
+    } catch (error) {
+      const errMsg = error.response?.data?.error || error.message || 'Failed to redeem points';
+      console.error('[LOYALTY] redeem error:', errMsg);
+      return { success: false, error: errMsg };
     }
   },
 

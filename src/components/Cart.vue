@@ -558,6 +558,29 @@ export default {
       }
     },
 
+    // Check for loyalty points intent pre-selected from profile (localStorage)
+    checkForLoyaltyIntent() {
+      try {
+        const intent = localStorage.getItem('ramyeon_use_loyalty_points')
+        if (!intent) return
+        localStorage.removeItem('ramyeon_use_loyalty_points')
+
+        const { points } = JSON.parse(intent)
+        const userPoints = this.userProfile?.loyalty_points || 0
+        if (!points || points < 40 || userPoints < 40) return
+
+        this.useLoyaltyPoints = true
+        this.onPointsToggle()
+        this.$nextTick(() => {
+          this.setPoints(Math.min(points, this.maxPointsToRedeem || 80))
+          this.validatePointsInput()
+        })
+        this.showSuccessNotification(`${points} loyalty points applied to this order!`)
+      } catch (e) {
+        localStorage.removeItem('ramyeon_use_loyalty_points')
+      }
+    },
+
     // Check for voucher pre-selected from profile (localStorage)
     checkForSelectedVoucher() {
       try {
@@ -1798,9 +1821,10 @@ export default {
     
     await this.loadUserProfile();
 
-    // Check for voucher from Profile before loading cart
+    // Check for voucher or loyalty intent from Profile before loading cart
     this.checkForSelectedVoucher();
-    
+    this.checkForLoyaltyIntent();
+
     const savedCart = localStorage.getItem('ramyeon_cart');
     if (CART_DEBUG) {
       console.log('[Cart] Loading cart from localStorage:', savedCart ? 'Found' : 'Empty');
