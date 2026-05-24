@@ -45,26 +45,21 @@ export function useLoyalty() {
     try {
       isLoading.value = true
       error.value = null
-      
-      // Check if user is authenticated
+
       const token = localStorage.getItem('access_token')
       if (!token) {
         loyaltyBalance.value = 0
         return { success: true, data: { balance: 0 } }
       }
-      
-      // Loyalty points come from user profile, not a separate endpoint
-      // The endpoints /customer/loyalty/* don't exist in the backend
-      // Points are fetched via authAPI.getProfile() and stored in userProfile.loyalty_points
-      console.log('💎 Loyalty balance from user profile (no separate API call needed)')
-      
-      // Return success without making API call
-      // The actual balance will be set from userProfile.loyalty_points in Cart.vue
+
+      const result = await loyaltyAPI.getBalance()
+      if (result.success && result.data) {
+        loyaltyBalance.value = result.data.balance ?? loyaltyBalance.value
+      }
       return { success: true, data: { balance: loyaltyBalance.value } }
     } catch (err) {
       error.value = err.message
-      loyaltyBalance.value = 0
-      return { success: true, data: { balance: 0 } }
+      return { success: true, data: { balance: loyaltyBalance.value } }
     } finally {
       isLoading.value = false
     }
@@ -76,24 +71,22 @@ export function useLoyalty() {
    * @param {Object} filters - Filter options
    * @returns {Promise<Object>} History result
    */
-  // eslint-disable-next-line no-unused-vars
   const getLoyaltyHistory = async (filters = {}) => {
     try {
       isLoading.value = true
       error.value = null
-      
-      // Check if user is authenticated
+
       const token = localStorage.getItem('access_token')
       if (!token) {
         loyaltyHistory.value = []
         return { success: true, data: [] }
       }
-      
-      // Loyalty history endpoint doesn't exist in backend
-      // Return empty history without making API call
-      console.log('📜 Loyalty history not available (no backend endpoint)')
-      loyaltyHistory.value = []
-      return { success: true, data: [] }
+
+      const result = await loyaltyAPI.getHistory(filters.limit || 50)
+      if (result.success && result.data) {
+        loyaltyHistory.value = result.data.history?.transactions || result.data.transactions || []
+      }
+      return { success: true, data: loyaltyHistory.value }
     } catch (err) {
       error.value = err.message
       loyaltyHistory.value = []

@@ -1318,7 +1318,7 @@ export default {
         }
 
         const script = document.createElement('script');
-        script.src = 'https://maps.googleapis.com/maps/api/js?key=AIzaSyAmv6-w1GHQ7Z4Y7c_iOlr17iw6Z6pnmC0&libraries=places&callback=initMap';
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.VUE_APP_GOOGLE_MAPS_KEY}&libraries=places&callback=initMap`;
         script.async = true;
         script.defer = true;
         
@@ -1508,17 +1508,18 @@ export default {
 
         if (this.paymentMethod === 'cash') {
           const result = await this.createOrder(orderData);
-          
+
           if (result.success) {
+            const orderId = result.data.id || result.data.order_id;
             this.confirmedOrder = {
-              id: result.data.id || result.data.order_id,
+              id: orderId,
               total: finalTotal.toFixed(2),
               paymentMethod: this.paymentMethod,
               deliveryType: this.deliveryType,
-              pointsEarned: result.data.points_earned || 0,
+              pointsEarned: result.data.order?.loyalty?.points_earned || 0,
               pointsUsed: orderData.points_to_redeem || 0
             };
-            
+            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
             this.clearCart();
             localStorage.removeItem('ramyeon_cart');
             this.$emit('cartCleared');
@@ -1528,7 +1529,7 @@ export default {
           }
         } else if (this.paymentMethod === 'gcash') {
           const result = await this.createOrder(orderData);
-          
+
           if (result.success) {
             const orderId =
               result.data?.order_id ||
@@ -1536,9 +1537,10 @@ export default {
               result.data?.id ||
               result.data?.order?._id;
 
+            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
             this.savePendingOrder(orderId, finalTotal);
             const paymentSource = await this.processGCashPayment(orderId);
-            
+
             if (paymentSource && paymentSource.checkout_url) {
               window.location.href = paymentSource.checkout_url;
             } else {
@@ -1549,7 +1551,7 @@ export default {
           }
         } else if (this.paymentMethod === 'card') {
           const result = await this.createOrder(orderData);
-          
+
           if (result.success) {
             const orderId =
               result.data?.order_id ||
@@ -1557,9 +1559,10 @@ export default {
               result.data?.id ||
               result.data?.order?._id;
 
+            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
             this.savePendingOrder(orderId, finalTotal);
             const paymentSource = await this.processCardPayment(orderId);
-            
+
             if (paymentSource && paymentSource.checkout_url) {
               window.location.href = paymentSource.checkout_url;
             } else {
@@ -1570,7 +1573,7 @@ export default {
           }
         } else if (this.paymentMethod === 'grabpay') {
           const result = await this.createOrder(orderData);
-          
+
           if (result.success) {
             const orderId =
               result.data?.order_id ||
@@ -1578,9 +1581,10 @@ export default {
               result.data?.id ||
               result.data?.order?._id;
 
+            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
             this.savePendingOrder(orderId, finalTotal);
             const paymentSource = await this.processGrabPayPayment(orderId);
-            
+
             if (paymentSource && paymentSource.checkout_url) {
               window.location.href = paymentSource.checkout_url;
             } else {
@@ -1591,17 +1595,18 @@ export default {
           }
         } else {
           const result = await this.createOrder(orderData);
-          
+
           if (result.success) {
+            const orderId = result.data.id || result.data.order_id || result.data.order?.order_id;
             this.confirmedOrder = {
-              id: result.data.id || result.data.order_id || result.data.order?.order_id,
+              id: orderId,
               total: finalTotal.toFixed(2),
               paymentMethod: this.paymentMethod,
               deliveryType: this.deliveryType,
-              pointsEarned: result.data.points_earned || result.data.order?.loyalty_points_earned || 0,
+              pointsEarned: result.data.order?.loyalty?.points_earned || 0,
               pointsUsed: orderData.points_to_redeem || 0
             };
-            
+            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
             this.clearCart();
             localStorage.removeItem('ramyeon_cart');
             this.showOrderConfirmation = true;

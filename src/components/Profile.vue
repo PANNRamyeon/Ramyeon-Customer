@@ -4,11 +4,23 @@
 
       <!-- Profile Header -->
       <div class="profile-header">
-        <div class="profile-avatar" @mouseenter="avatarHover = true" @mouseleave="avatarHover = false">
-          {{ avatarHover ? '✨' : '👤' }}
+        <div class="profile-header-left">
+          <div class="profile-avatar" @mouseenter="avatarHover = true" @mouseleave="avatarHover = false">
+            {{ avatarHover ? '✨' : '👤' }}
+          </div>
+          <h1 class="profile-name">{{ user.firstName }} {{ user.lastName }}</h1>
+          <p class="profile-email">{{ user.email }}</p>
         </div>
-        <h1 class="profile-name">{{ user.firstName }} {{ user.lastName }}</h1>
-        <p class="profile-email">{{ user.email }}</p>
+        <div v-if="user.qr_code" class="profile-header-right">
+          <QRCode
+            :code="user.qr_code"
+            title="My Loyalty QR"
+            subtitle="Show to cashier to earn points"
+            instructions="Present at the counter when ordering"
+            size="medium"
+            :showCode="false"
+          />
+        </div>
       </div>
 
       <!-- Profile Main Content -->
@@ -118,20 +130,6 @@
           </div>
         </div>
 
-        <!-- QR CODE SECTION HIDDEN -->
-        <!--
-        <div class="qr-section">
-          <h3 class="qr-title">Scan for Points</h3>
-          <QRCode
-            :code="user.pointsQRCode || generatePointsQRCode()"
-            title=""
-            subtitle=""
-            :instructions="'Show this QR code when making a purchase to earn points'"
-            size="medium"
-          />
-        </div>
-        -->
-
         <!-- Settings Section -->
        <!-- <div class="settings-section">
           <h3 class="settings-title">Account & App Settings</h3>
@@ -177,21 +175,24 @@
 
 <script>
 import VoucherModal from './VoucherModal.vue'
+import QRCode from './QRCode.vue'
 
 export default {
   name: 'Profile',
   components: {
-    VoucherModal
+    VoucherModal,
+    QRCode
   },
   emits: ['setCurrentPage'],
   data() {
     return {
       user: {
-        firstName: 'John',
-        lastName: 'Doe',
-        email: 'john.doe@example.com',
-        points: 3280,
+        firstName: '',
+        lastName: '',
+        email: '',
+        points: 0,
         loyalty_points: 0,
+        qr_code: null,
         vouchers: []
       },
 
@@ -311,16 +312,22 @@ export default {
       const userSession = localStorage.getItem('ramyeon_user_session')
       if (userSession) {
         const userData = JSON.parse(userSession)
+        const firstName = userData.firstName || (userData.fullName ? userData.fullName.split(' ')[0] : '')
+        const lastName = userData.lastName || (userData.fullName ? userData.fullName.split(' ').slice(1).join(' ') : '')
         this.user = {
           ...userData,
+          firstName,
+          lastName,
           vouchers: []
         }
       } else {
         this.user = {
-          firstName: 'Guest',
-          lastName: 'User',
-          email: 'guest@ramyeoncorner.com',
-          points: 3280,
+          firstName: '',
+          lastName: '',
+          email: '',
+          points: 0,
+          loyalty_points: 0,
+          qr_code: null,
           vouchers: []
         }
       }
@@ -358,7 +365,8 @@ export default {
           firstName: first || this.user.firstName,
           lastName: last || this.user.lastName,
           email: user.email || this.user.email,
-          loyalty_points: user.loyalty_points || 0
+          loyalty_points: user.loyalty_points || 0,
+          qr_code: user.qr_code || null
         }
 
         if (user.vouchers) {
@@ -367,9 +375,23 @@ export default {
           )
         }
 
+        // Sync fresh API data back to localStorage so loadUserData() stays accurate
+        try {
+          const stored = JSON.parse(localStorage.getItem('ramyeon_user_session') || '{}')
+          localStorage.setItem('ramyeon_user_session', JSON.stringify({
+            ...stored,
+            firstName: this.user.firstName,
+            lastName: this.user.lastName,
+            fullName: `${this.user.firstName} ${this.user.lastName}`.trim(),
+            email: this.user.email,
+            loyalty_points: this.user.loyalty_points,
+            qr_code: this.user.qr_code,
+            id: this.customerId || stored.id,
+          }))
+        } catch { /* */ }
+
       } catch (e) {
         console.error(e)
-        this.user.loyalty_points = 50
       }
     },
 

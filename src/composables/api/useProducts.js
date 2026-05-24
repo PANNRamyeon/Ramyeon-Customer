@@ -103,7 +103,7 @@ export function useProducts() {
           console.log('✅ Using cached products data')
           products.value = cachedData.data
           isLoading.value = false
-          return { success: true, data: cachedData.data }
+          return { success: true, data: { products: cachedData.data, pagination: cachedData.pagination } }
         }
       }
       
@@ -116,19 +116,20 @@ export function useProducts() {
       
       // Fetch from API
       const result = await productsAPI.getAll(apiFilters)
-      
-      if (result.data) {
-        products.value = result.data
+
+      if (result.data && result.data.products) {
+        products.value = result.data.products
         lastFetchTime.value = Date.now()
-        
-        // Cache the result
+
+        // Cache the result (include pagination so switching back restores correct page count)
         productsCache.value.set(cacheKey, {
           data: products.value,
+          pagination: result.data.pagination,
           timestamp: Date.now()
         })
-        
+
         console.log(`✅ Fetched ${products.value.length} products`)
-        return { success: true, data: products.value }
+        return { success: true, data: result.data }
       } else {
         throw new Error(result.message || 'Failed to fetch products')
       }

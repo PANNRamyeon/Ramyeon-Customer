@@ -102,17 +102,17 @@ export function useCategories() {
       
       // Fetch from API
       const result = await categoriesAPI.getAll()
-      
-      if (result.categories) {
-        categories.value = result.categories
+
+      if (result.data && result.data.categories) {
+        categories.value = result.data.categories
         lastFetchTime.value = Date.now()
-        
+
         // Cache the result
         categoriesCache.value = {
           data: categories.value,
           timestamp: Date.now()
         }
-        
+
         console.log(`✅ Fetched ${categories.value.length} categories`)
         return { success: true, data: categories.value }
       } else {

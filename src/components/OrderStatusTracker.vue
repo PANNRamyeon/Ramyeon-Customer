@@ -200,6 +200,20 @@ export default {
           color: 'green',
           progress: 100
         },
+        'processing': {
+          label: 'Preparing Order',
+          description: 'We are gathering and preparing your items',
+          icon: '📦',
+          color: 'blue',
+          progress: 40
+        },
+        'shipped': {
+          label: 'Out for Delivery',
+          description: 'Your order is on the way to you',
+          icon: '🚚',
+          color: 'blue',
+          progress: 90
+        },
         'cancelled': {
           label: 'Cancelled',
           description: 'This order has been cancelled',

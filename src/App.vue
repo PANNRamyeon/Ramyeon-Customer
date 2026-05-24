@@ -72,6 +72,38 @@
         </div>
       </nav>
 
+      <!-- Active Order Banner (FoodPanda-style) -->
+      <div v-if="activeOrder && !activeOrderMinimized" class="order-banner" :class="orderBannerClass">
+        <div class="order-banner-inner">
+          <div class="order-banner-left">
+            <span class="order-pulse-dot" :class="orderBannerClass"></span>
+            <div class="order-banner-info">
+              <span class="order-banner-label">{{ orderStatusLabel }}</span>
+              <span class="order-banner-id">#{{ activeOrder.id }}</span>
+            </div>
+          </div>
+          <div class="order-banner-steps">
+            <template v-for="(step, i) in orderSteps" :key="step.key">
+              <div class="order-step" :class="{ completed: step.completed, active: step.active }">
+                <div class="step-dot"></div>
+                <span class="step-label">{{ step.label }}</span>
+              </div>
+              <div v-if="i < orderSteps.length - 1" class="step-connector" :class="{ completed: step.completed }"></div>
+            </template>
+          </div>
+          <div class="order-banner-actions">
+            <button class="order-view-btn" @click="setCurrentPage('OrderHistory')">View Details</button>
+            <button class="order-banner-minimize" @click="activeOrderMinimized = true" title="Minimize">&#8212;</button>
+            <button class="order-banner-close" @click="dismissOrderBanner" title="Dismiss">&#10005;</button>
+          </div>
+        </div>
+      </div>
+      <div v-else-if="activeOrder && activeOrderMinimized" class="order-banner-pill" @click="activeOrderMinimized = false">
+        <span class="order-pulse-dot" :class="orderBannerClass"></span>
+        <span>{{ orderStatusLabel }} &nbsp;·&nbsp; #{{ activeOrder.id }}</span>
+        <span class="pill-expand">&#9650;</span>
+      </div>
+
       <!-- Page Content -->
       <HelloWorld v-if="currentPage === 'Home'" @setCurrentPage="setCurrentPage" />
       <AboutUs v-if="currentPage === 'About'" />
@@ -165,6 +197,7 @@
 
 
 <script>
+import { ordersAPI } from './services/api.js'
 import HelloWorld from './components/HelloWorld.vue'
 import AboutUs from './components/AboutUs.vue'
 import MenuPage from './components/Menu.vue'
@@ -216,7 +249,9 @@ export default {
       showSignOutModal: false,
       cartKey: 0,
       orderHistoryKey: 0,
-      paymentHistoryKey: 0
+      paymentHistoryKey: 0,
+      activeOrder: null,
+      activeOrderMinimized: false
     }
   },
   computed: {
@@ -231,19 +266,70 @@ export default {
     },
     cartCount() {
       return this.cartItems.reduce((total, item) => total + item.quantity, 0);
-    }
+    },
+    orderStatusLabel() {
+      const map = {
+        pending: 'Order Received',
+        confirmed: 'Order Confirmed',
+        processing: 'Preparing',
+        preparing: 'Preparing',
+        cooking: 'Cooking',
+        ready: 'Ready!',
+        shipped: 'On the Way',
+        on_the_way: 'On the Way',
+        out_for_delivery: 'On the Way',
+        delivered: 'Delivered!',
+        completed: 'Delivered!',
+        cancelled: 'Cancelled',
+      };
+      return map[this.activeOrder?.status] || 'Processing';
+    },
+    orderBannerClass() {
+      const s = this.activeOrder?.status;
+      if (s === 'cancelled') return 'banner-cancelled';
+      if (s === 'delivered' || s === 'completed') return 'banner-done';
+      if (s === 'shipped' || s === 'on_the_way' || s === 'out_for_delivery') return 'banner-otw';
+      if (s === 'processing' || s === 'preparing' || s === 'cooking' || s === 'ready') return 'banner-preparing';
+      return 'banner-active';
+    },
+    orderSteps() {
+      const s = this.activeOrder?.status || 'pending';
+      // Normalize backend statuses to the step progression
+      const normalize = {
+        preparing: 'processing', cooking: 'processing', ready: 'processing',
+        shipped: 'on_the_way', out_for_delivery: 'on_the_way',
+        completed: 'delivered',
+      };
+      const normalized = normalize[s] || s;
+      const ORDER = ['pending', 'confirmed', 'processing', 'on_the_way', 'delivered'];
+      const currentIdx = ORDER.indexOf(normalized);
+      return [
+        { key: 'pending',    label: 'Received' },
+        { key: 'confirmed',  label: 'Confirmed' },
+        { key: 'processing', label: 'Preparing' },
+        { key: 'on_the_way', label: 'On the Way' },
+        { key: 'delivered',  label: 'Delivered' },
+      ].map((step, i) => ({
+        ...step,
+        completed: i < currentIdx,
+        active: i === currentIdx,
+      }));
+    },
   },
   mounted() {
-    // Check URL hash to determine initial page (important for PayMongo redirects!)
     this.checkURLHash();
     window.addEventListener('cart-updated', this.loadCartItems);
+    window.addEventListener('order-placed', this.handleOrderPlaced);
     this.checkUserSession();
     this.loadDarkModePreference();
     this.loadCartItems();
+    this.loadActiveOrder();
     window.addEventListener('hashchange', this.handleHashChange);
   },
   beforeUnmount() {
     window.removeEventListener('cart-updated', this.loadCartItems);
+    window.removeEventListener('order-placed', this.handleOrderPlaced);
+    clearInterval(this._orderPollTimer);
   },
   methods: {
     resetCart() {
@@ -681,14 +767,10 @@ export default {
     },
 
     confirmSignOut() {
-      // Clear user session
       this.currentUser = null;
       localStorage.removeItem('ramyeon_user_session');
-
-      // Clear cart completely
       this.resetCart();
-
-      // Close modal & redirect
+      this.dismissOrderBanner();
       this.showSignOutModal = false;
       this.setCurrentPage('Home');
 
@@ -769,6 +851,60 @@ export default {
       }
     },
     
+    // ---- Active Order Banner ----
+    handleOrderPlaced(event) {
+      const orderId = event.detail?.orderId;
+      if (!orderId) return;
+      this.activeOrder = { id: orderId, status: 'pending' };
+      this.activeOrderMinimized = false;
+      localStorage.setItem('ramyeon_active_order', JSON.stringify(this.activeOrder));
+      this.startOrderPolling();
+    },
+
+    loadActiveOrder() {
+      try {
+        const stored = localStorage.getItem('ramyeon_active_order');
+        if (!stored) return;
+        const order = JSON.parse(stored);
+        if (!['completed', 'delivered', 'cancelled'].includes(order.status)) {
+          this.activeOrder = order;
+          this.startOrderPolling();
+        } else {
+          localStorage.removeItem('ramyeon_active_order');
+        }
+      } catch { /* */ }
+    },
+
+    startOrderPolling() {
+      clearInterval(this._orderPollTimer);
+      this._orderPollTimer = setInterval(() => this.pollOrderStatus(), 30000);
+    },
+
+    async pollOrderStatus() {
+      if (!this.activeOrder?.id) return;
+      try {
+        const result = await ordersAPI.getStatus(this.activeOrder.id);
+        if (!result?.success) return;
+        const newStatus = result.order_status || result.data?.order_status;
+        if (!newStatus || newStatus === this.activeOrder.status) return;
+        this.activeOrder = { ...this.activeOrder, status: newStatus };
+        localStorage.setItem('ramyeon_active_order', JSON.stringify(this.activeOrder));
+        if (['completed', 'delivered'].includes(newStatus)) {
+          setTimeout(() => this.dismissOrderBanner(), 15000);
+        } else if (newStatus === 'cancelled') {
+          setTimeout(() => this.dismissOrderBanner(), 8000);
+        }
+      } catch { /* silent */ }
+    },
+
+    dismissOrderBanner() {
+      this.activeOrder = null;
+      this.activeOrderMinimized = false;
+      localStorage.removeItem('ramyeon_active_order');
+      clearInterval(this._orderPollTimer);
+    },
+    // ---- End Active Order Banner ----
+
     handleCartCleared() {
       // Immediately clear cartItems array for instant UI update
       console.log('🛒 Cart cleared event received, updating App.vue cartItems');
@@ -1879,6 +2015,228 @@ html, body {
     height: 18px;
   }
 }
+
+/* ===== Active Order Banner ===== */
+.order-banner {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 48px);
+  max-width: 900px;
+  padding: 12px 20px;
+  display: flex;
+  justify-content: center;
+  z-index: 600;
+  border-radius: 16px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08);
+  animation: bannerSlideUp 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes bannerSlideUp {
+  from { opacity: 0; transform: translateX(-50%) translateY(30px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* Light base with brand red outline */
+.order-banner.banner-active,
+.order-banner.banner-preparing,
+.order-banner.banner-otw,
+.order-banner.banner-done {
+  background: #ffffff;
+  border: 2.5px solid #ff4757;
+}
+.order-banner.banner-cancelled {
+  background: #fff5f5;
+  border: 2.5px solid #ffb3b3;
+}
+
+.order-banner-inner {
+  max-width: 1200px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  color: #1a1a1a;
+  font-family: 'Poppins', sans-serif;
+}
+
+.order-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.order-banner-info {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.order-banner-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #ff4757;
+}
+.order-banner.banner-cancelled .order-banner-label { color: #cc3333; }
+.order-banner-id {
+  font-size: 0.72rem;
+  color: #888;
+}
+
+/* Pulsing dot */
+.order-pulse-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.order-pulse-dot.banner-active,
+.order-pulse-dot.banner-preparing,
+.order-pulse-dot.banner-otw    { background: #ff4757; box-shadow: 0 0 0 0 rgba(255,71,87,0.5); }
+.order-pulse-dot.banner-done   { background: #ff4757; animation: none; }
+.order-pulse-dot.banner-cancelled { background: #ffb3b3; animation: none; }
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255,71,87,0.5); }
+  70%  { box-shadow: 0 0 0 8px rgba(255,71,87,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,71,87,0); }
+}
+
+/* Step progress */
+.order-banner-steps {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+.order-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 60px;
+}
+.step-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: transparent;
+  border: 2px solid #ddd;
+  transition: all 0.3s ease;
+}
+.order-step.completed .step-dot {
+  background: #ff4757;
+  border-color: #ff4757;
+  box-shadow: 0 0 5px rgba(255,71,87,0.35);
+}
+.order-step.active .step-dot {
+  background: #ff4757;
+  border-color: #ff4757;
+  box-shadow: 0 0 10px rgba(255,71,87,0.45);
+  transform: scale(1.4);
+}
+.step-label {
+  font-size: 0.62rem;
+  color: #bbb;
+  text-align: center;
+  white-space: nowrap;
+  transition: color 0.3s, font-weight 0.3s;
+}
+.order-step.active .step-label    { color: #ff4757; font-weight: 700; }
+.order-step.completed .step-label { color: #aaa; }
+.step-connector {
+  flex: 1;
+  height: 2px;
+  background: #e8e8e8;
+  min-width: 20px;
+  max-width: 50px;
+  margin-bottom: 14px;
+  transition: background 0.3s ease;
+}
+.step-connector.completed { background: #ff4757; }
+
+/* Actions */
+.order-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.order-view-btn {
+  background: transparent;
+  border: 2.5px solid #ff4757;
+  color: #ff4757;
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: 'Poppins', sans-serif;
+}
+.order-view-btn:hover {
+  background: #ff4757;
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255,71,87,0.3);
+}
+.order-banner-minimize,
+.order-banner-close {
+  background: none;
+  border: none;
+  color: #ccc;
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: color 0.2s;
+}
+.order-banner-minimize:hover,
+.order-banner-close:hover { color: #ff4757; }
+
+/* Minimized pill — fixed bottom-right */
+.order-banner-pill {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: #ffffff;
+  border: 2.5px solid #ff4757;
+  color: #1a1a1a;
+  border-radius: 30px;
+  padding: 9px 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: 'Poppins', sans-serif;
+  cursor: pointer;
+  z-index: 600;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1), 0 1px 4px rgba(255,71,87,0.15);
+  transition: transform 0.2s, box-shadow 0.2s;
+  animation: bannerSlideUp 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.order-banner-pill:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.12), 0 2px 8px rgba(255,71,87,0.25);
+}
+.pill-expand { font-size: 0.6rem; color: #ff4757; margin-left: 4px; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .order-banner-steps { display: none; }
+  .order-banner-inner { gap: 12px; }
+  .order-banner { width: calc(100% - 32px); bottom: 16px; }
+}
+@media (max-width: 480px) {
+  .order-banner { width: calc(100% - 24px); bottom: 12px; border-radius: 12px; }
+}
+@media (max-width: 480px) {
+  .order-view-btn { display: none; }
+}
+/* ===== End Active Order Banner ===== */
 
 /* Enhanced slide transitions for auth pages */
 .slide-enter-active,

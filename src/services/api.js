@@ -206,7 +206,7 @@ export const productsAPI = {
   // Get all products
   getAll: async (params = {}) => {
     try {
-      const response = await apiClient.get('/products/', { params });
+      const response = await apiClient.get('/web/products/', { params });
       return response.data;
     } catch (error) {
       console.error('Failed to fetch products:', error.response?.data);
@@ -217,7 +217,7 @@ export const productsAPI = {
   // Get product by ID
   getById: async (id) => {
     try {
-      const response = await apiClient.get(`/products/${id}/`);
+      const response = await apiClient.get(`/web/products/${id}/`);
       return response.data;
     } catch (error) {
       console.error('Failed to fetch product:', error.response?.data);
@@ -229,12 +229,9 @@ export const productsAPI = {
   getByCategory: async (categoryId, subcategory = null, page = 1, limit = 20) => {
     try {
       const params = { page, limit };
-      if (subcategory) params.subcategory = subcategory;
+      if (subcategory) params.subcategory_name = subcategory;
 
-      const response = await apiClient.get(
-        `/category/${categoryId}/subcategories/${subcategory || 'all'}/products/`,
-        { params }
-      );
+      const response = await apiClient.get(`/web/products/category/${categoryId}/`, { params });
       return response.data;
     } catch (error) {
       console.error('Failed to fetch products by category:', error.response?.data);
@@ -245,7 +242,7 @@ export const productsAPI = {
   // Search products
   search: async (query) => {
     try {
-      const response = await apiClient.get('/pos/search/', { params: { q: query } });
+      const response = await apiClient.get('/web/products/search/', { params: { q: query } });
       return response.data;
     } catch (error) {
       console.error('Failed to search products:', error.response?.data);
@@ -260,7 +257,7 @@ export const productsAPI = {
 export const categoriesAPI = {
   getAll: async () => {
     try {
-      const response = await apiClient.get('/category/');
+      const response = await apiClient.get('/web/categories/');
       return response.data;
     } catch (error) {
       console.error('Failed to fetch categories:', error.response?.data);
@@ -271,7 +268,7 @@ export const categoriesAPI = {
   // Get category by ID
   getById: async (id) => {
     try {
-      const response = await apiClient.get(`/category/${id}/`);
+      const response = await apiClient.get(`/web/categories/${id}/`);
       return response.data;
     } catch (error) {
       console.error('Failed to fetch category:', error.response?.data);
@@ -279,10 +276,10 @@ export const categoriesAPI = {
     }
   },
 
-  // Get subcategories
+  // Get subcategories (uses category detail endpoint)
   getSubcategories: async (categoryId) => {
     try {
-      const response = await apiClient.get(`/category/${categoryId}/subcategories/`);
+      const response = await apiClient.get(`/web/categories/${categoryId}/`);
       return response.data;
     } catch (error) {
       console.error('Failed to fetch subcategories:', error.response?.data);
@@ -391,7 +388,7 @@ export const ordersAPI = {
         special_instructions: orderData?.special_instructions || orderData?.notes || '',
       };
 
-      const response = await apiClient.post('/pos/orders/online/create/', payload);
+      const response = await apiClient.post('/pos/orders/online/create/', payload, { timeout: 45000 });
       
       // Backend returns { success: true, data: {...} } or { success: false, error: "..." }
       if (response.data && response.data.success) {
@@ -487,95 +484,47 @@ export const ordersAPI = {
 
 
 // ============================================================================
-// LOYALTY API (Enhanced, local fallbacks where backend missing)
+// LOYALTY API
 // ============================================================================
 export const loyaltyAPI = {
-  // Get customer loyalty points balance (local fallback)
-  getBalance: async (customerId = null) => {
+  getBalance: async () => {
     try {
-      // Try backend if customerId provided and endpoint exists
-      if (customerId) {
-        try {
-          const response = await apiClient.get(`/customers/${customerId}/loyalty/`);
-          return { success: true, ...response.data };
-        } catch (err) {
-          // Fallthrough to local fallback
-          console.warn('[LOYALTY] Backend balance fetch failed, using fallback', err?.response?.data || err.message);
-        }
-      }
-
-      // Local fallback
-      return {
-        success: true,
-        balance: 0,
-        points: 0,
-        message: 'Using local fallback - backend endpoint not available'
-      };
+      const response = await apiClient.get('/web/loyalty/balance/');
+      return { success: true, ...response.data };
     } catch (error) {
       console.error('[LOYALTY] getBalance error:', error);
       return { success: false, error: error.message || 'Failed to fetch loyalty balance' };
     }
   },
 
-  // Get customer loyalty history (local fallback)
-  getHistory: async (customerId = null, limit = 50) => {
+  getHistory: async (limit = 50) => {
     try {
-      if (customerId) {
-        try {
-          const response = await apiClient.get(`/customers/${customerId}/loyalty/history/`, { params: { limit } });
-          return { success: true, ...response.data };
-        } catch (err) {
-          console.warn('[LOYALTY] Backend history fetch failed, using fallback', err?.response?.data || err.message);
-        }
-      }
-
-      return {
-        success: true,
-        history: [],
-        message: 'Using local fallback - backend endpoint not available'
-      };
+      const response = await apiClient.get('/web/loyalty/history/', { params: { limit } });
+      return { success: true, ...response.data };
     } catch (error) {
       console.error('[LOYALTY] getHistory error:', error);
       return { success: false, error: error.message || 'Failed to fetch loyalty history' };
     }
   },
 
-  // Validate points redemption
-  validateRedemption: async (pointsToRedeem, subtotal, customerId) => {
+  validateRedemption: async (pointsToRedeem) => {
     try {
-      if (!customerId) {
-        // cannot validate against backend without customer id; fallback
-        return { success: false, error: 'Customer ID required for redemption validation' };
-      }
-      const response = await apiClient.get(`/customers/${customerId}/`);
-      const available = response.data?.loyalty_points ?? 0;
-      const valid = typeof pointsToRedeem === 'number' && pointsToRedeem > 0 && pointsToRedeem <= available;
-      return { success: valid, available_points: available };
+      const response = await apiClient.post('/web/loyalty/validate-redemption/', { points_to_redeem: pointsToRedeem });
+      return { success: true, ...response.data };
     } catch (error) {
       console.error('[LOYALTY] validateRedemption error:', error.response?.data || error.message);
       return { success: false, error: 'Failed to validate points redemption' };
     }
   },
 
-  // Calculate loyalty points earned
-  calculatePointsEarned: async (subtotalAfterDiscount) => {
-    try {
-      const subtotal = Number(subtotalAfterDiscount || 0);
-      if (!Number.isFinite(subtotal) || subtotal <= 0) {
-        return { success: true, data: { points_earned: 0 } };
-      }
-      const points = Math.floor(subtotal * 0.20); // 20% earn rate
-      return { success: true, data: { points_earned: points } };
-    } catch (error) {
-      console.error('[LOYALTY] calculatePointsEarned error:', error);
-      return { success: false, error: error.message || 'Failed to calculate points earned' };
-    }
+  calculatePointsEarned: (subtotalAfterDiscount) => {
+    const subtotal = Number(subtotalAfterDiscount || 0);
+    return Math.floor(subtotal * 0.20);
   },
 
-  // Redeem loyalty points against a customer's account
-  redeem: async (customerId, points, reason = 'Points redemption') => {
+  redeem: async (points, description = 'Points redemption') => {
     try {
-      const response = await apiClient.post(`/admin/customers/${customerId}/loyalty/redeem/`, { points, reason });
+      const response = await apiClient.post('/web/loyalty/redeem/', { points_to_redeem: points, description });
       return { success: true, ...response.data };
     } catch (error) {
       const errMsg = error.response?.data?.error || error.message || 'Failed to redeem points';
@@ -584,34 +533,20 @@ export const loyaltyAPI = {
     }
   },
 
-  // Get current loyalty tier (local fallback)
-  getCurrentTier: async (customerId = null) => {
+  award: async (orderAmount, description = 'Points earned from order') => {
     try {
-      if (customerId) {
-        try {
-          const response = await apiClient.get(`/customers/${customerId}/loyalty/tier/`);
-          return { success: true, ...response.data };
-        } catch (err) {
-          console.warn('[LOYALTY] Backend tier fetch failed, using fallback', err?.response?.data || err.message);
-        }
-      }
-
-      return {
-        success: true,
-        tier: {
-          name: 'Bronze',
-          level: 1,
-          min_points: 0,
-          max_points: 999,
-          benefits: ['Basic rewards']
-        },
-        message: 'Using local fallback - backend endpoint not available'
-      };
+      const response = await apiClient.post('/web/loyalty/award/', { order_amount: orderAmount, description });
+      return { success: true, ...response.data };
     } catch (error) {
-      console.error('[LOYALTY] getCurrentTier error:', error);
-      return { success: false, error: error.message || 'Failed to fetch current tier' };
+      console.error('[LOYALTY] award error:', error);
+      return { success: false, error: error.message || 'Failed to award points' };
     }
-  }
+  },
+
+  getCurrentTier: () => ({
+    success: true,
+    tier: { name: 'Bronze', level: 1, min_points: 0, max_points: 999, benefits: ['Basic rewards'] }
+  }),
 };
 
 // ============================================================================
