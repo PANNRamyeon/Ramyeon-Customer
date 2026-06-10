@@ -85,16 +85,14 @@ export function useCategories() {
    * @param {Object} filters - Filter options (active, featured, etc.)
    * @returns {Promise<Object>} Categories data
    */
-  const getCategories = async (filters = {}) => {
+  const getCategories = async () => {
     try {
       isLoading.value = true
       error.value = null
       
-      console.log('📂 Fetching categories with filters:', filters)
       
       // Check cache first
       if (categoriesCache.value && Date.now() - categoriesCache.value.timestamp < 300000) {
-        console.log('✅ Using cached categories data')
         categories.value = categoriesCache.value.data
         isLoading.value = false
         return { success: true, data: categoriesCache.value.data }
@@ -113,7 +111,6 @@ export function useCategories() {
           timestamp: Date.now()
         }
 
-        console.log(`✅ Fetched ${categories.value.length} categories`)
         return { success: true, data: categories.value }
       } else {
         throw new Error(result.message || 'Failed to fetch categories')
@@ -137,7 +134,6 @@ export function useCategories() {
       isLoading.value = true
       error.value = null
       
-      console.log('📂 Fetching category:', categoryId)
       
       // Check if category is already in our list
       const existingCategory = categories.value.find(cat => cat._id === categoryId)
@@ -152,7 +148,6 @@ export function useCategories() {
       
       if (result.success) {
         currentCategory.value = result.data
-        console.log('✅ Category fetched successfully')
         return { success: true, data: result.data }
       } else {
         throw new Error(result.error || 'Failed to fetch category')
@@ -175,11 +170,9 @@ export function useCategories() {
       isHierarchyLoading.value = true
       hierarchyError.value = null
       
-      console.log('🌳 Fetching category hierarchy')
       
       // Check cache first
       if (hierarchyCache.value && Date.now() - hierarchyCache.value.timestamp < 300000) {
-        console.log('✅ Using cached hierarchy data')
         categoryHierarchy.value = hierarchyCache.value.data
         isHierarchyLoading.value = false
         return { success: true, data: hierarchyCache.value.data }
@@ -195,7 +188,6 @@ export function useCategories() {
           timestamp: Date.now()
         }
         
-        console.log('✅ Category hierarchy fetched successfully')
         return { success: true, data: result.data }
       } else {
         throw new Error(result.error || 'Failed to fetch category hierarchy')
@@ -219,7 +211,6 @@ export function useCategories() {
       isLoading.value = true
       error.value = null
       
-      console.log('📂 Fetching subcategories for parent:', parentId)
       
       // Check if we already have subcategories in our list
       const existingSubcategories = categories.value.filter(cat => cat.parent_id === parentId)
@@ -234,7 +225,6 @@ export function useCategories() {
       
       if (result.success) {
         subcategories.value = result.data.results || result.data
-        console.log(`✅ Fetched ${subcategories.value.length} subcategories`)
         return { success: true, data: subcategories.value }
       } else {
         throw new Error(result.error || 'Failed to fetch subcategories')
@@ -263,13 +253,11 @@ export function useCategories() {
         return { success: true, data: [] }
       }
       
-      console.log('🔍 Searching categories:', query)
       
       const result = await categoriesAPI.getAll()
       
       if (result.success) {
         searchResults.value = result.data.results || result.data
-        console.log(`✅ Found ${searchResults.value.length} categories`)
         return { success: true, data: searchResults.value }
       } else {
         throw new Error(result.error || 'Category search failed')
@@ -292,13 +280,11 @@ export function useCategories() {
       isLoading.value = true
       error.value = null
       
-      console.log('⭐ Fetching featured categories')
       
       const result = await categoriesAPI.getAll()
       
       if (result.success) {
         const featured = result.data.results || result.data
-        console.log(`✅ Fetched ${featured.length} featured categories`)
         return { success: true, data: featured }
       } else {
         throw new Error(result.error || 'Failed to fetch featured categories')
@@ -327,7 +313,6 @@ export function useCategories() {
       currentCategory.value = category
     }
     
-    console.log('📂 Current category set to:', currentCategory.value?.name)
   }
   
   /**
@@ -335,7 +320,6 @@ export function useCategories() {
    */
   const clearCurrentCategory = () => {
     currentCategory.value = null
-    console.log('📂 Current category cleared')
   }
   
   /**
@@ -361,7 +345,6 @@ export function useCategories() {
    */
   const navigateToRoot = () => {
     clearCurrentCategory()
-    console.log('📂 Navigated to root categories')
   }
   
   // ================================================================
@@ -389,7 +372,6 @@ export function useCategories() {
    * Refresh categories data
    */
   const refreshCategories = async () => {
-    console.log('🔄 Refreshing categories data')
     categoriesCache.value = null
     hierarchyCache.value = null
     lastFetchTime.value = null
@@ -400,7 +382,6 @@ export function useCategories() {
    * Clear all cache
    */
   const clearCache = () => {
-    console.log('🗑️ Clearing categories cache')
     categoriesCache.value = null
     hierarchyCache.value = null
     lastFetchTime.value = null

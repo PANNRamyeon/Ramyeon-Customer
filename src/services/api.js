@@ -6,7 +6,6 @@ import axios from 'axios';
 // ---------------------------------------------------------------------------
 const API_BASE_URL = process.env.VUE_APP_API_URL || 'https://pann-pos.onrender.com/api/v1';
 
-console.log('[API] Resolved Base URL:', API_BASE_URL);
 
 // Export base URL
 export const apiBaseUrl = API_BASE_URL;
@@ -117,7 +116,6 @@ export const authAPI = {
   // Registration (enabled)
   register: async (payload) => {
     try {
-      console.log('[API] Register attempt:', payload.email);
       const res = await apiClient.post('/auth/customer/register/', payload);
 
       const { access_token, refresh_token } = res.data || {};
@@ -135,7 +133,6 @@ export const authAPI = {
   // Login
   login: async (email, password) => {
     try {
-      console.log('[API] Login attempt:', email);
       const response = await apiClient.post('/auth/customer/login/', { email, password });
 
       const { access_token, refresh_token } = response.data || {};
@@ -293,22 +290,18 @@ export const categoriesAPI = {
 // ============================================================================
 export const cartAPI = {
   getCart: async () => {
-    console.warn('Cart API not available; using fallback');
     return { items: [], total: 0 };
   },
 
   addItem: async () => {
-    console.warn('Cart API addItem not implemented');
     return { message: 'Cart API not available' };
   },
 
   removeItem: async () => {
-    console.warn('Cart API removeItem not implemented');
     return { message: 'Cart API not available' };
   },
 
   clearCart: async () => {
-    console.warn('Cart API clearCart not implemented');
     return { message: 'Cart API not available' };
   },
 };
@@ -336,16 +329,24 @@ export const ordersAPI = {
       }
 
       // Call the backend endpoint
-      const response = await apiClient.get(`/pos/orders/online/customer/${customerId}/`, {
+      const response = await apiClient.get(`/web/orders/customer/${customerId}/`, {
         params: { limit, offset }
       });
 
-      console.log('✅ Backend response:', response.data);
+      console.log('✅ [ordersAPI.getAll] Raw response.data:', response.data);
+      console.log('✅ [ordersAPI.getAll] Is array?', Array.isArray(response.data));
+      console.log('✅ [ordersAPI.getAll] Type:', typeof response.data);
+      if (response.data && typeof response.data === 'object' && !Array.isArray(response.data)) {
+        console.log('✅ [ordersAPI.getAll] Object keys:', Object.keys(response.data));
+      }
+      if (Array.isArray(response.data) && response.data.length > 0) {
+        console.log('✅ [ordersAPI.getAll] First order sample:', JSON.stringify(response.data[0], null, 2));
+      }
 
       // The backend returns an ARRAY directly, not {results: array}
       // So we need to wrap it in the expected format
-      return { 
-        success: true, 
+      return {
+        success: true,
         results: response.data // response.data is the array of orders
       };
 
@@ -388,15 +389,27 @@ export const ordersAPI = {
         special_instructions: orderData?.special_instructions || orderData?.notes || '',
       };
 
-      const response = await apiClient.post('/pos/orders/online/create/', payload, { timeout: 45000 });
-      
+      console.log('📤 [ordersAPI.create] Payload being sent to backend:', JSON.stringify(payload, null, 2));
+      console.log('📤 [ordersAPI.create] customer_id in payload:', payload.customer_id);
+      console.log('📤 [ordersAPI.create] item count:', payload.items.length);
+
+      const response = await apiClient.post('/web/orders/create/', payload, { timeout: 45000 });
+
+      console.log('📥 [ordersAPI.create] Raw response status:', response.status);
+      console.log('📥 [ordersAPI.create] Raw response.data:', JSON.stringify(response.data, null, 2));
+
       // Backend returns { success: true, data: {...} } or { success: false, error: "..." }
       if (response.data && response.data.success) {
-        return { success: true, data: response.data.data || response.data };
+        const orderResult = response.data.data || response.data;
+        console.log('✅ [ordersAPI.create] Order created — transaction_id:', orderResult?.transaction_id || orderResult?.order_id || orderResult?.id);
+        console.log('✅ [ordersAPI.create] customer_id on created order:', orderResult?.order?.customer?.customer_id || orderResult?.customer_id);
+        console.log('✅ [ordersAPI.create] stock deduction: handled async on backend (not in response)');
+        return { success: true, data: orderResult };
       } else {
-        return { 
-          success: false, 
-          error: response.data?.error || response.data?.message || 'Failed to create order' 
+        console.warn('❌ [ordersAPI.create] Backend returned failure:', response.data);
+        return {
+          success: false,
+          error: response.data?.error || response.data?.message || 'Failed to create order'
         };
       }
 
@@ -413,7 +426,7 @@ export const ordersAPI = {
   // -------------------------------------------------------------------------
   getById: async (id) => {
     try {
-      const response = await apiClient.get(`/pos/orders/online/${id}/`);
+      const response = await apiClient.get(`/web/orders/${id}/`);
       return response.data;
     } catch (error) {
       // fallback: localStorage lookup
@@ -437,7 +450,7 @@ export const ordersAPI = {
         return { success: false, error: 'Not authenticated' };
       }
 
-      const response = await apiClient.get(`/pos/orders/online/${orderId}/`);
+      const response = await apiClient.get(`/web/orders/${orderId}/`);
       return { success: true, ...response.data };
 
     } catch (error) {
@@ -457,6 +470,27 @@ export const ordersAPI = {
       // Network or unexpected
       console.error('❌ Network error during order status:', error.message);
       return { success: false, error: error.message || 'Network error' };
+    }
+  },
+
+  // -------------------------------------------------------------------------
+  // Cancel order (customer-initiated)
+  // -------------------------------------------------------------------------
+  cancel: async (orderId, reason = 'Customer cancellation') => {
+    try {
+      const userSession = JSON.parse(localStorage.getItem('ramyeon_user_session') || '{}');
+      const customerId = userSession.id || 'customer';
+
+      const response = await apiClient.post(`/web/orders/${orderId}/cancel/`, {
+        cancellation_reason: reason,
+        customer_id: customerId,
+      });
+
+      return { success: true, data: response.data };
+    } catch (error) {
+      const msg = error.response?.data?.error || error.message || 'Failed to cancel order';
+      console.error('[ordersAPI.cancel] error:', msg);
+      return { success: false, error: msg };
     }
   },
 
@@ -632,14 +666,8 @@ export const promotionsAPI = {
 // ============================================================================
 export const newsletterAPI = {
   // eslint-disable-next-line no-unused-vars
-  subscribe: async (email) => {
-    try {
-      console.warn('[NEWSLETTER] subscribe endpoint not implemented in backend');
-      return { message: 'Newsletter subscription not available' };
-    } catch (error) {
-      console.error('[NEWSLETTER] subscribe error:', error);
-      return { success: false, error: 'Failed to subscribe' };
-    }
+  subscribe: async (_email) => {
+    return { message: 'Newsletter subscription not available' };
   }
 };
 
@@ -648,14 +676,8 @@ export const newsletterAPI = {
 // ============================================================================
 export const contactAPI = {
   // eslint-disable-next-line no-unused-vars
-  sendMessage: async (messageData) => {
-    try {
-      console.warn('[CONTACT] sendMessage endpoint not implemented in backend');
-      return { message: 'Contact form not available' };
-    } catch (error) {
-      console.error('[CONTACT] sendMessage error:', error);
-      return { success: false, error: 'Failed to send message' };
-    }
+  sendMessage: async (_messageData) => {
+    return { message: 'Contact form not available' };
   }
 };
 

@@ -567,8 +567,8 @@ export default {
           birthdate: customer.birthdate || this.profileData.birthdate,
           profilePicture: customer.profile_picture || this.profileData.profilePicture,
         }
-      } catch (error) {
-        console.log('Not logged in or error fetching profile:', error)
+      } catch {
+        // profile load failure is non-fatal
       }
     },
 
@@ -724,10 +724,7 @@ export default {
       }
     },
 
-    togglePreference(preference) {
-      // Preference already toggled by v-model, but we can log which one
-      console.log(`Preference ${preference} toggled`);
-    },
+    togglePreference() {},
 
     async savePreferences() {
       this.isSavingPreferences = true;

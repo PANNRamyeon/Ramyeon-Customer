@@ -201,13 +201,7 @@ export default {
     },
 
     displayProducts() {
-      console.log('🔄 Display products computed:', this.products?.length || 0);
-      const allProducts = this.products || [];
-      
-      // Show all products - don't filter by stock
-      // Products with stock <= 0 will have disabled add buttons
-      console.log(`📦 Showing ${allProducts.length} products`);
-      return allProducts;
+      return this.products || [];
     }
   },
   async mounted() {
@@ -220,11 +214,7 @@ export default {
       this.error = null;
       
       try {
-        // Fetch categories using composable
         await this.getCategories();
-        console.log('📂 Categories loaded:', this.categories);
-        
-        // Fetch all products initially using composable
         await this.fetchProducts();
         
         this.loading = false;
@@ -251,23 +241,6 @@ export default {
         response = await this.getProducts(filters);
         
         if (response.success && response.data) {
-          // Products are already in the composable state
-          console.log('📦 Products updated in composable:', response.data.length);
-          
-          // DEBUG: Check first product's image data
-          if (response.data.length > 0) {
-            const firstProduct = response.data[0];
-            console.log('🖼️ First product image check:', {
-              name: firstProduct.product_name,
-              hasImageUrl: !!firstProduct.image_url,
-              hasImage: !!firstProduct.image,
-              imageUrlType: typeof firstProduct.image_url,
-              imageUrlLength: firstProduct.image_url ? firstProduct.image_url.length : 0,
-              imageUrlPrefix: firstProduct.image_url ? firstProduct.image_url.substring(0, 100) : 'none'
-            });
-          }
-          
-          // Update pagination if available
           if (response.data.pagination) {
             this.pagination = {
               current_page: response.data.pagination.current_page,
@@ -276,8 +249,6 @@ export default {
               items_per_page: response.data.pagination.items_per_page
             };
           }
-        } else {
-          console.warn('⚠️ No products data received:', response);
         }
         
         this.loadingProducts = false;
@@ -354,8 +325,6 @@ export default {
     },
 
     handleImageError(event) {
-      // Fallback image when product image fails to load
-      console.log('⚠️ Image failed to load, using placeholder');
       event.target.src = require('../assets/Home/BigRamen.png');
     },
     resolveImageSrc(product) {
@@ -373,13 +342,7 @@ export default {
       // 4) Fallback placeholder
       return require('../assets/Home/BigRamen.png');
     },
-    handleImageLoad(product) {
-      console.log('✅ Image loaded for:', product.product_name, {
-        hasImageUrl: !!product.image_url,
-        hasImage: !!product.image,
-        imageUrlPrefix: product.image_url ? product.image_url.substring(0, 50) : 'none'
-      });
-    }
+    handleImageLoad() {}
   },
 };
 </script>

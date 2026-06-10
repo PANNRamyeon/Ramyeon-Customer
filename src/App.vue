@@ -347,7 +347,6 @@ export default {
     },
 
     handleHashChange() {
-      console.log("🔙 Back button detected. Hash:", window.location.hash);
       this.checkURLHash();   // Re-read URL and update currentPage
       this.scheduleScrollReset();
     },
@@ -501,7 +500,6 @@ export default {
       // ✅ Force reload of certain components when navigating to them
       if (page === 'OrderHistory') {
         this.orderHistoryKey++;
-        console.log('📦 Forcing OrderHistory reload');
       } else if (page === 'PaymentHistory') {
         this.paymentHistoryKey++;
       } else if (page === 'Cart') {
@@ -906,16 +904,9 @@ export default {
     // ---- End Active Order Banner ----
 
     handleCartCleared() {
-      // Immediately clear cartItems array for instant UI update
-      console.log('🛒 Cart cleared event received, updating App.vue cartItems');
       this.cartItems = [];
-      // Also reload from localStorage to ensure sync (should be empty now)
       this.loadCartItems();
-      // Force Vue to update the computed cartCount
-      this.$nextTick(() => {
-        this.$forceUpdate();
-        console.log('🛒 Cart count updated:', this.cartCount);
-      });
+      this.$nextTick(() => this.$forceUpdate());
     }
   },
   

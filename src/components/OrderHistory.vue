@@ -76,7 +76,15 @@
         <!-- Actions -->
         <div class="order-actions">
           <button class="btn-details" @click="openModal(order)">View Details</button>
-          <button class="btn-reorder" @click="reorder(order)">Order Again</button>
+          <button
+            v-if="isCancellable(order)"
+            class="btn-cancel"
+            :disabled="cancellingId === order.id"
+            @click="cancelOrder(order)"
+          >
+            {{ cancellingId === order.id ? 'Cancelling...' : 'Cancel' }}
+          </button>
+          <button v-else class="btn-reorder" @click="reorder(order)">Order Again</button>
         </div>
 
       </div>
@@ -182,7 +190,8 @@ export default {
       orders: [],
       loading: false,
       selectedOrder: null,
-      error: null
+      error: null,
+      cancellingId: null,
     };
   },
 
@@ -202,15 +211,30 @@ export default {
     async loadOrders() {
       this.loading = true;
       this.error = null;
+
+      const session = JSON.parse(localStorage.getItem('ramyeon_user_session') || '{}');
+      console.log('[OrderHistory] session from localStorage:', session);
+      console.log('[OrderHistory] customerId used for fetch:', session.id);
+      console.log('[OrderHistory] access_token present?', !!localStorage.getItem('access_token'));
+
       try {
         const result = await ordersAPI.getAll();
         console.log('[OrderHistory] getAll result:', result);
+        console.log('[OrderHistory] result.success:', result.success);
+        console.log('[OrderHistory] result.results is array?', Array.isArray(result.results));
+        console.log('[OrderHistory] result.results type:', typeof result.results);
+        console.log('[OrderHistory] result.results value:', result.results);
+
         if (result.success && Array.isArray(result.results)) {
           this.orders = result.results.map(o => this.mapOrder(o));
-          console.log('[OrderHistory] mapped orders:', this.orders.length);
+          console.log('[OrderHistory] mapped orders count:', this.orders.length);
+          if (this.orders.length > 0) {
+            console.log('[OrderHistory] first mapped order:', this.orders[0]);
+          }
         } else {
           this.error = result.error || 'Failed to load orders';
-          console.warn('[OrderHistory] error:', this.error);
+          console.warn('[OrderHistory] not loading orders — success:', result.success, '| isArray:', Array.isArray(result.results));
+          console.warn('[OrderHistory] error set to:', this.error);
         }
       } catch (err) {
         this.error = 'Unable to load orders. Please try again.';
@@ -332,7 +356,33 @@ export default {
         failed: 'Failed', refunded: 'Refunded', cancelled: 'Cancelled'
       };
       return map[s] || s;
-    }
+    },
+
+    isCancellable(order) {
+      return ['pending', 'confirmed'].includes(order.status);
+    },
+
+    async cancelOrder(order) {
+      const reason = prompt('Reason for cancellation (required):');
+      if (!reason || !reason.trim()) return;
+
+      this.cancellingId = order.id;
+      try {
+        const result = await ordersAPI.cancel(order.id, reason.trim());
+        if (result.success) {
+          const idx = this.orders.findIndex(o => o.id === order.id);
+          if (idx !== -1) this.orders[idx].status = 'cancelled';
+          if (this.selectedOrder?.id === order.id) this.selectedOrder.status = 'cancelled';
+        } else {
+          alert(result.error || 'Failed to cancel order.');
+        }
+      } catch (err) {
+        alert('Something went wrong. Please try again.');
+        console.error('[OrderHistory] cancelOrder error:', err);
+      } finally {
+        this.cancellingId = null;
+      }
+    },
   }
 };
 </script>
@@ -504,6 +554,19 @@ export default {
   background: #ff3742;
   box-shadow: 0 4px 12px rgba(255,71,87,0.35);
   transform: translateY(-1px);
+}
+.btn-cancel {
+  background: transparent;
+  border: 1.5px solid #dc2626;
+  color: #dc2626;
+}
+.btn-cancel:hover:not(:disabled) {
+  background: #dc2626;
+  color: #fff;
+}
+.btn-cancel:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 /* ── Error State ────────────────────────────────────────── */
