@@ -15,8 +15,6 @@ export const onlineOrderAPI = {
    */
   createOrder: async (orderData) => {
     try {
-      console.log('🛒 Creating enhanced online order:', orderData);
-      
       const response = await apiClient.post('/online-orders/', {
         customer_id: orderData.customerId,
         items: orderData.items,
@@ -29,7 +27,6 @@ export const onlineOrderAPI = {
         notes: orderData.notes || ''
       });
       
-      console.log('✅ Order created successfully:', response.data);
       return {
         success: true,
         data: response.data
@@ -95,13 +92,9 @@ export const onlineOrderAPI = {
    */
   cancelOrder: async (orderId, reason = 'Customer cancellation') => {
     try {
-      console.log(`🚫 Cancelling order ${orderId}:`, reason);
-      
       const response = await apiClient.post(`/online-orders/${orderId}/cancel/`, {
         reason: reason
       });
-      
-      console.log('✅ Order cancelled successfully');
       return {
         success: true,
         data: response.data
@@ -146,13 +139,9 @@ export const onlineOrderAPI = {
    */
   validateStock: async (items) => {
     try {
-      console.log('📦 Validating stock for items:', items);
-      
       const response = await apiClient.post('/online-orders/validate-stock/', {
         items: items
       });
-      
-      console.log('✅ Stock validation result:', response.data);
       return {
         success: true,
         data: response.data
@@ -174,14 +163,10 @@ export const onlineOrderAPI = {
    */
   validatePointsRedemption: async (pointsToRedeem, subtotal) => {
     try {
-      console.log(`⭐ Validating points redemption: ${pointsToRedeem} points for ₱${subtotal}`);
-      
       const response = await apiClient.post('/online-orders/validate-points/', {
         points_to_redeem: pointsToRedeem,
         subtotal: subtotal
       });
-      
-      console.log('✅ Points validation result:', response.data);
       return {
         success: true,
         data: response.data
@@ -202,13 +187,9 @@ export const onlineOrderAPI = {
    */
   calculateLoyaltyPoints: async (subtotalAfterDiscount) => {
     try {
-      console.log(`⭐ Calculating loyalty points for ₱${subtotalAfterDiscount}`);
-      
       const response = await apiClient.post('/online-orders/calculate-points/', {
         subtotal_after_discount: subtotalAfterDiscount
       });
-      
-      console.log('✅ Points calculation result:', response.data);
       return {
         success: true,
         data: response.data
@@ -230,14 +211,10 @@ export const onlineOrderAPI = {
    */
   calculateServiceFee: async (subtotal, deliveryType = 'delivery') => {
     try {
-      console.log(`💰 Calculating service fee for ₱${subtotal} (${deliveryType})`);
-      
       const response = await apiClient.post('/online-orders/calculate-fee/', {
         subtotal: subtotal,
         delivery_type: deliveryType
       });
-      
-      console.log('✅ Service fee calculation result:', response.data);
       return {
         success: true,
         data: response.data

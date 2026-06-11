@@ -90,7 +90,6 @@ export function useProducts() {
       isProductsLoading.value = true
       error.value = null
       
-      console.log('🛍️ Fetching products with filters:', filters)
       
       // Check cache first
       const cacheKey = JSON.stringify(filters)
@@ -100,10 +99,9 @@ export function useProducts() {
         
         // Use cache if less than 5 minutes old
         if (cacheAge < 300000) {
-          console.log('✅ Using cached products data')
           products.value = cachedData.data
           isLoading.value = false
-          return { success: true, data: cachedData.data }
+          return { success: true, data: { products: cachedData.data, pagination: cachedData.pagination } }
         }
       }
       
@@ -116,19 +114,19 @@ export function useProducts() {
       
       // Fetch from API
       const result = await productsAPI.getAll(apiFilters)
-      
-      if (result.data) {
-        products.value = result.data
+
+      if (result.data && result.data.products) {
+        products.value = result.data.products
         lastFetchTime.value = Date.now()
-        
-        // Cache the result
+
+        // Cache the result (include pagination so switching back restores correct page count)
         productsCache.value.set(cacheKey, {
           data: products.value,
+          pagination: result.data.pagination,
           timestamp: Date.now()
         })
-        
-        console.log(`✅ Fetched ${products.value.length} products`)
-        return { success: true, data: products.value }
+
+        return { success: true, data: result.data }
       } else {
         throw new Error(result.message || 'Failed to fetch products')
       }
@@ -152,7 +150,6 @@ export function useProducts() {
       isLoading.value = true
       error.value = null
       
-      console.log('🛍️ Fetching product:', productId)
       
       // Check cache first
       if (productsCache.value.has(productId)) {
@@ -160,7 +157,6 @@ export function useProducts() {
         const cacheAge = Date.now() - cachedData.timestamp
         
         if (cacheAge < 300000) { // 5 minutes
-          console.log('✅ Using cached product data')
           currentProduct.value = cachedData.data
           isLoading.value = false
           return { success: true, data: cachedData.data }
@@ -180,7 +176,6 @@ export function useProducts() {
           timestamp: Date.now()
         })
         
-        console.log('✅ Product fetched successfully')
         return { success: true, data: result.data }
       } else {
         throw new Error(result.error || 'Failed to fetch product')
@@ -211,13 +206,11 @@ export function useProducts() {
         return { success: true, data: [] }
       }
       
-      console.log('🔍 Searching products:', query)
       
       const result = await productsAPI.search(query)
       
       if (result.success) {
         searchResults.value = result.data.results || result.data
-        console.log(`✅ Found ${searchResults.value.length} products`)
         return { success: true, data: searchResults.value }
       } else {
         throw new Error(result.error || 'Search failed')
@@ -240,13 +233,11 @@ export function useProducts() {
       isLoading.value = true
       error.value = null
       
-      console.log('⭐ Fetching featured products')
       
       const result = await productsAPI.getFeatured()
       
       if (result.success) {
         featuredProducts.value = result.data.results || result.data
-        console.log(`✅ Fetched ${featuredProducts.value.length} featured products`)
         return { success: true, data: featuredProducts.value }
       } else {
         throw new Error(result.error || 'Failed to fetch featured products')
@@ -276,25 +267,21 @@ export function useProducts() {
       isStockValidating.value = true
       stockError.value = null
       
-      console.log(`📦 Checking stock for product ${productId}: ${quantity} units`)
       
       // Try backend validation first
       try {
         const result = await stockAPI.checkProductStock(productId, quantity)
         
         if (result.success) {
-          console.log('✅ Stock validation successful')
           return { success: true, data: result.data }
         } else {
           throw new Error(result.error || 'Stock validation failed')
         }
       } catch (backendError) {
         // If backend validation fails (e.g., 403 Forbidden), use local validation
-        console.warn('⚠️ Backend stock validation failed, using local validation:', backendError.message)
         
         // For now, assume stock is available locally
         // In a real app, you might want to cache stock data or use a different approach
-        console.log('✅ Using local stock validation (assuming stock available)')
         return { 
           success: true, 
           data: { 
@@ -323,7 +310,6 @@ export function useProducts() {
       isStockValidating.value = true
       stockError.value = null
       
-      console.log('📦 Validating stock for items:', items)
       
       // Skip backend validation when product IDs are not Mongo ObjectIds
       const requiresBackendValidation = Array.isArray(items) && items.some(item => {
@@ -332,7 +318,6 @@ export function useProducts() {
       })
       
       if (!requiresBackendValidation) {
-        console.warn('⚠️ Skipping backend stock validation (non-ObjectId product IDs), using local validation')
         return { 
           success: true, 
           data: { 
@@ -348,17 +333,14 @@ export function useProducts() {
         const result = await stockAPI.validateStock(items)
         
         if (result.success) {
-          console.log('✅ Stock validation successful')
           return { success: true, data: result.data }
         } else {
           throw new Error(result.error || 'Stock validation failed')
         }
       } catch (backendError) {
         // If backend validation fails (e.g., 403 Forbidden), use local validation
-        console.warn('⚠️ Backend stock validation failed, using local validation:', backendError.message)
         
         // For now, assume stock is available locally
-        console.log('✅ Using local stock validation (assuming stock available)')
         return { 
           success: true, 
           data: { 
@@ -388,12 +370,10 @@ export function useProducts() {
    */
   const getProductRecommendations = async (productId) => {
     try {
-      console.log('💡 Getting product recommendations for:', productId)
       
       const result = await productsAPI.getRecommendations(productId)
       
       if (result.success) {
-        console.log('✅ Product recommendations fetched')
         return { success: true, data: result.data }
       } else {
         throw new Error(result.error || 'Failed to fetch recommendations')
@@ -411,12 +391,10 @@ export function useProducts() {
    */
   const getRelatedProducts = async (productId) => {
     try {
-      console.log('🔗 Getting related products for:', productId)
       
       const result = await productsAPI.getRelated(productId)
       
       if (result.success) {
-        console.log('✅ Related products fetched')
         return { success: true, data: result.data }
       } else {
         throw new Error(result.error || 'Failed to fetch related products')
@@ -452,7 +430,6 @@ export function useProducts() {
    * Refresh products data
    */
   const refreshProducts = async () => {
-    console.log('🔄 Refreshing products data')
     productsCache.value.clear()
     lastFetchTime.value = null
     return await getProducts()
@@ -462,7 +439,6 @@ export function useProducts() {
    * Clear all cache
    */
   const clearCache = () => {
-    console.log('🗑️ Clearing products cache')
     productsCache.value.clear()
     lastFetchTime.value = null
   }

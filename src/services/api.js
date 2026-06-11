@@ -4,36 +4,8 @@ import axios from 'axios';
 // ---------------------------------------------------------------------------
 // Resolve API Base URL
 // ---------------------------------------------------------------------------
-let API_BASE_URL =
-  // Vue CLI
-  (typeof process !== 'undefined' && process.env && (
-    process.env.VUE_APP_API_URL ||
-    process.env.VITE_API_URL
-  )) ||
+const API_BASE_URL = process.env.VUE_APP_API_URL || 'https://pann-pos.onrender.com/api/v1';
 
-  // Vite
-  (typeof import.meta !== 'undefined' && import.meta.env && (
-    import.meta.env.VITE_API_URL ||
-    import.meta.env.VITE_API_BASE_URL ||
-    import.meta.env.VUE_APP_API_URL
-  )) ||
-
-  // Default to production API
-  'https://pann-pos.onrender.com/api/v1';
-
-// Guard for invalid paths
-if (!API_BASE_URL || (API_BASE_URL.startsWith('/'))) {
-  API_BASE_URL = 'https://pann-pos.onrender.com/api/v1';
-}
-
-// Debug log
-try {
-  if (typeof window !== 'undefined') {
-    console.log('[API] Resolved Base URL:', API_BASE_URL);
-  }
-} catch (err) {
-  console.warn('[API] Failed to log base URL:', err);
-}
 
 // Export base URL
 export const apiBaseUrl = API_BASE_URL;
@@ -45,6 +17,7 @@ export const apiBaseUrl = API_BASE_URL;
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
+  timeout: 15000,
 });
 
 // ---------------------------------------------------------------------------
@@ -65,6 +38,76 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
+// ---------------------------------------------------------------------------
+// Interceptor: Token Refresh on 401
+// ---------------------------------------------------------------------------
+let isRefreshing = false;
+let refreshQueue = [];
+
+const processRefreshQueue = (error, token = null) => {
+  refreshQueue.forEach(({ resolve, reject }) => error ? reject(error) : resolve(token));
+  refreshQueue = [];
+};
+
+const clearLocalAuth = () => {
+  localStorage.removeItem('access_token');
+  localStorage.removeItem('refresh_token');
+  localStorage.removeItem('ramyeon_user_session');
+};
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+
+    if (error.response?.status !== 401 || originalRequest._retry) {
+      return Promise.reject(error);
+    }
+
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (!refreshToken) {
+      clearLocalAuth();
+      return Promise.reject(error);
+    }
+
+    if (isRefreshing) {
+      return new Promise((resolve, reject) => {
+        refreshQueue.push({ resolve, reject });
+      }).then((token) => {
+        originalRequest.headers.Authorization = `Bearer ${token}`;
+        return apiClient(originalRequest);
+      });
+    }
+
+    originalRequest._retry = true;
+    isRefreshing = true;
+
+    try {
+      const res = await axios.post(`${API_BASE_URL}/auth/token/refresh/`, {
+        refresh: refreshToken,
+      });
+
+      const newAccessToken = res.data.access || res.data.access_token;
+      const newRefreshToken = res.data.refresh || res.data.refresh_token;
+
+      localStorage.setItem('access_token', newAccessToken);
+      if (newRefreshToken) localStorage.setItem('refresh_token', newRefreshToken);
+
+      apiClient.defaults.headers.common.Authorization = `Bearer ${newAccessToken}`;
+      processRefreshQueue(null, newAccessToken);
+
+      originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+      return apiClient(originalRequest);
+    } catch (refreshError) {
+      processRefreshQueue(refreshError, null);
+      clearLocalAuth();
+      return Promise.reject(refreshError);
+    } finally {
+      isRefreshing = false;
+    }
+  }
+);
+
 // ============================================================================
 // AUTH API
 // Registration ENABLED | getProfile → /auth/customer/profile/
@@ -73,7 +116,6 @@ export const authAPI = {
   // Registration (enabled)
   register: async (payload) => {
     try {
-      console.log('[API] Register attempt:', payload.email);
       const res = await apiClient.post('/auth/customer/register/', payload);
 
       const { access_token, refresh_token } = res.data || {};
@@ -91,7 +133,6 @@ export const authAPI = {
   // Login
   login: async (email, password) => {
     try {
-      console.log('[API] Login attempt:', email);
       const response = await apiClient.post('/auth/customer/login/', { email, password });
 
       const { access_token, refresh_token } = response.data || {};
@@ -103,6 +144,21 @@ export const authAPI = {
       console.error('[API] Login error:', error.response?.data);
       throw error.response?.data || { error: 'Login failed' };
     }
+  },
+
+  // Refresh access token manually
+  refreshToken: async () => {
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (!refreshToken) throw new Error('No refresh token available');
+
+    const res = await axios.post(`${API_BASE_URL}/auth/token/refresh/`, { refresh: refreshToken });
+    const newAccessToken = res.data.access || res.data.access_token;
+    const newRefreshToken = res.data.refresh || res.data.refresh_token;
+
+    localStorage.setItem('access_token', newAccessToken);
+    if (newRefreshToken) localStorage.setItem('refresh_token', newRefreshToken);
+
+    return newAccessToken;
   },
 
   // Logout
@@ -147,7 +203,7 @@ export const productsAPI = {
   // Get all products
   getAll: async (params = {}) => {
     try {
-      const response = await apiClient.get('/products/', { params });
+      const response = await apiClient.get('/web/products/', { params });
       return response.data;
     } catch (error) {
       console.error('Failed to fetch products:', error.response?.data);
@@ -158,7 +214,7 @@ export const productsAPI = {
   // Get product by ID
   getById: async (id) => {
     try {
-      const response = await apiClient.get(`/products/${id}/`);
+      const response = await apiClient.get(`/web/products/${id}/`);
       return response.data;
     } catch (error) {
       console.error('Failed to fetch product:', error.response?.data);
@@ -170,12 +226,9 @@ export const productsAPI = {
   getByCategory: async (categoryId, subcategory = null, page = 1, limit = 20) => {
     try {
       const params = { page, limit };
-      if (subcategory) params.subcategory = subcategory;
+      if (subcategory) params.subcategory_name = subcategory;
 
-      const response = await apiClient.get(
-        `/category/${categoryId}/subcategories/${subcategory || 'all'}/products/`,
-        { params }
-      );
+      const response = await apiClient.get(`/web/products/category/${categoryId}/`, { params });
       return response.data;
     } catch (error) {
       console.error('Failed to fetch products by category:', error.response?.data);
@@ -186,7 +239,7 @@ export const productsAPI = {
   // Search products
   search: async (query) => {
     try {
-      const response = await apiClient.get('/pos/search/', { params: { q: query } });
+      const response = await apiClient.get('/web/products/search/', { params: { q: query } });
       return response.data;
     } catch (error) {
       console.error('Failed to search products:', error.response?.data);
@@ -201,7 +254,7 @@ export const productsAPI = {
 export const categoriesAPI = {
   getAll: async () => {
     try {
-      const response = await apiClient.get('/category/');
+      const response = await apiClient.get('/web/categories/');
       return response.data;
     } catch (error) {
       console.error('Failed to fetch categories:', error.response?.data);
@@ -212,7 +265,7 @@ export const categoriesAPI = {
   // Get category by ID
   getById: async (id) => {
     try {
-      const response = await apiClient.get(`/category/${id}/`);
+      const response = await apiClient.get(`/web/categories/${id}/`);
       return response.data;
     } catch (error) {
       console.error('Failed to fetch category:', error.response?.data);
@@ -220,10 +273,10 @@ export const categoriesAPI = {
     }
   },
 
-  // Get subcategories
+  // Get subcategories (uses category detail endpoint)
   getSubcategories: async (categoryId) => {
     try {
-      const response = await apiClient.get(`/category/${categoryId}/subcategories/`);
+      const response = await apiClient.get(`/web/categories/${categoryId}/`);
       return response.data;
     } catch (error) {
       console.error('Failed to fetch subcategories:', error.response?.data);
@@ -237,22 +290,18 @@ export const categoriesAPI = {
 // ============================================================================
 export const cartAPI = {
   getCart: async () => {
-    console.warn('Cart API not available; using fallback');
     return { items: [], total: 0 };
   },
 
   addItem: async () => {
-    console.warn('Cart API addItem not implemented');
     return { message: 'Cart API not available' };
   },
 
   removeItem: async () => {
-    console.warn('Cart API removeItem not implemented');
     return { message: 'Cart API not available' };
   },
 
   clearCart: async () => {
-    console.warn('Cart API clearCart not implemented');
     return { message: 'Cart API not available' };
   },
 };
@@ -280,16 +329,24 @@ export const ordersAPI = {
       }
 
       // Call the backend endpoint
-      const response = await apiClient.get(`/online-orders/customer/${customerId}/`, {
+      const response = await apiClient.get(`/web/orders/customer/${customerId}/`, {
         params: { limit, offset }
       });
 
-      console.log('✅ Backend response:', response.data);
+      console.log('✅ [ordersAPI.getAll] Raw response.data:', response.data);
+      console.log('✅ [ordersAPI.getAll] Is array?', Array.isArray(response.data));
+      console.log('✅ [ordersAPI.getAll] Type:', typeof response.data);
+      if (response.data && typeof response.data === 'object' && !Array.isArray(response.data)) {
+        console.log('✅ [ordersAPI.getAll] Object keys:', Object.keys(response.data));
+      }
+      if (Array.isArray(response.data) && response.data.length > 0) {
+        console.log('✅ [ordersAPI.getAll] First order sample:', JSON.stringify(response.data[0], null, 2));
+      }
 
       // The backend returns an ARRAY directly, not {results: array}
       // So we need to wrap it in the expected format
-      return { 
-        success: true, 
+      return {
+        success: true,
         results: response.data // response.data is the array of orders
       };
 
@@ -332,15 +389,27 @@ export const ordersAPI = {
         special_instructions: orderData?.special_instructions || orderData?.notes || '',
       };
 
-      const response = await apiClient.post('/online-orders/', payload);
-      
+      console.log('📤 [ordersAPI.create] Payload being sent to backend:', JSON.stringify(payload, null, 2));
+      console.log('📤 [ordersAPI.create] customer_id in payload:', payload.customer_id);
+      console.log('📤 [ordersAPI.create] item count:', payload.items.length);
+
+      const response = await apiClient.post('/web/orders/create/', payload, { timeout: 45000 });
+
+      console.log('📥 [ordersAPI.create] Raw response status:', response.status);
+      console.log('📥 [ordersAPI.create] Raw response.data:', JSON.stringify(response.data, null, 2));
+
       // Backend returns { success: true, data: {...} } or { success: false, error: "..." }
       if (response.data && response.data.success) {
-        return { success: true, data: response.data.data || response.data };
+        const orderResult = response.data.data || response.data;
+        console.log('✅ [ordersAPI.create] Order created — transaction_id:', orderResult?.transaction_id || orderResult?.order_id || orderResult?.id);
+        console.log('✅ [ordersAPI.create] customer_id on created order:', orderResult?.order?.customer?.customer_id || orderResult?.customer_id);
+        console.log('✅ [ordersAPI.create] stock deduction: handled async on backend (not in response)');
+        return { success: true, data: orderResult };
       } else {
-        return { 
-          success: false, 
-          error: response.data?.error || response.data?.message || 'Failed to create order' 
+        console.warn('❌ [ordersAPI.create] Backend returned failure:', response.data);
+        return {
+          success: false,
+          error: response.data?.error || response.data?.message || 'Failed to create order'
         };
       }
 
@@ -357,7 +426,7 @@ export const ordersAPI = {
   // -------------------------------------------------------------------------
   getById: async (id) => {
     try {
-      const response = await apiClient.get(`/sales/get/${id}/`);
+      const response = await apiClient.get(`/web/orders/${id}/`);
       return response.data;
     } catch (error) {
       // fallback: localStorage lookup
@@ -381,7 +450,7 @@ export const ordersAPI = {
         return { success: false, error: 'Not authenticated' };
       }
 
-      const response = await apiClient.get(`/online/orders/${orderId}/status/`);
+      const response = await apiClient.get(`/web/orders/${orderId}/`);
       return { success: true, ...response.data };
 
     } catch (error) {
@@ -405,11 +474,32 @@ export const ordersAPI = {
   },
 
   // -------------------------------------------------------------------------
+  // Cancel order (customer-initiated)
+  // -------------------------------------------------------------------------
+  cancel: async (orderId, reason = 'Customer cancellation') => {
+    try {
+      const userSession = JSON.parse(localStorage.getItem('ramyeon_user_session') || '{}');
+      const customerId = userSession.id || 'customer';
+
+      const response = await apiClient.post(`/web/orders/${orderId}/cancel/`, {
+        cancellation_reason: reason,
+        customer_id: customerId,
+      });
+
+      return { success: true, data: response.data };
+    } catch (error) {
+      const msg = error.response?.data?.error || error.message || 'Failed to cancel order';
+      console.error('[ordersAPI.cancel] error:', msg);
+      return { success: false, error: msg };
+    }
+  },
+
+  // -------------------------------------------------------------------------
   // Update order status (POS/Admin)
   // -------------------------------------------------------------------------
   updateStatus: async (orderId, newStatus, notes = '') => {
     try {
-      const res = await apiClient.post(`/online-orders/${orderId}/status/`, {
+      const res = await apiClient.post(`/pos/orders/${orderId}/status/`, {
         status: newStatus,
         notes: notes
       });
@@ -428,119 +518,69 @@ export const ordersAPI = {
 
 
 // ============================================================================
-// LOYALTY API (Enhanced, local fallbacks where backend missing)
+// LOYALTY API
 // ============================================================================
 export const loyaltyAPI = {
-  // Get customer loyalty points balance (local fallback)
-  getBalance: async (customerId = null) => {
+  getBalance: async () => {
     try {
-      // Try backend if customerId provided and endpoint exists
-      if (customerId) {
-        try {
-          const response = await apiClient.get(`/customers/${customerId}/loyalty/`);
-          return { success: true, ...response.data };
-        } catch (err) {
-          // Fallthrough to local fallback
-          console.warn('[LOYALTY] Backend balance fetch failed, using fallback', err?.response?.data || err.message);
-        }
-      }
-
-      // Local fallback
-      return {
-        success: true,
-        balance: 0,
-        points: 0,
-        message: 'Using local fallback - backend endpoint not available'
-      };
+      const response = await apiClient.get('/web/loyalty/balance/');
+      return { success: true, ...response.data };
     } catch (error) {
       console.error('[LOYALTY] getBalance error:', error);
       return { success: false, error: error.message || 'Failed to fetch loyalty balance' };
     }
   },
 
-  // Get customer loyalty history (local fallback)
-  getHistory: async (customerId = null, limit = 50) => {
+  getHistory: async (limit = 50) => {
     try {
-      if (customerId) {
-        try {
-          const response = await apiClient.get(`/customers/${customerId}/loyalty/history/`, { params: { limit } });
-          return { success: true, ...response.data };
-        } catch (err) {
-          console.warn('[LOYALTY] Backend history fetch failed, using fallback', err?.response?.data || err.message);
-        }
-      }
-
-      return {
-        success: true,
-        history: [],
-        message: 'Using local fallback - backend endpoint not available'
-      };
+      const response = await apiClient.get('/web/loyalty/history/', { params: { limit } });
+      return { success: true, ...response.data };
     } catch (error) {
       console.error('[LOYALTY] getHistory error:', error);
       return { success: false, error: error.message || 'Failed to fetch loyalty history' };
     }
   },
 
-  // Validate points redemption
-  validateRedemption: async (pointsToRedeem, subtotal, customerId) => {
+  validateRedemption: async (pointsToRedeem) => {
     try {
-      if (!customerId) {
-        // cannot validate against backend without customer id; fallback
-        return { success: false, error: 'Customer ID required for redemption validation' };
-      }
-      const response = await apiClient.get(`/customers/${customerId}/`);
-      const available = response.data?.loyalty_points ?? 0;
-      const valid = typeof pointsToRedeem === 'number' && pointsToRedeem > 0 && pointsToRedeem <= available;
-      return { success: valid, available_points: available };
+      const response = await apiClient.post('/web/loyalty/validate-redemption/', { points_to_redeem: pointsToRedeem });
+      return { success: true, ...response.data };
     } catch (error) {
       console.error('[LOYALTY] validateRedemption error:', error.response?.data || error.message);
       return { success: false, error: 'Failed to validate points redemption' };
     }
   },
 
-  // Calculate loyalty points earned
-  calculatePointsEarned: async (subtotalAfterDiscount) => {
+  calculatePointsEarned: (subtotalAfterDiscount) => {
+    const subtotal = Number(subtotalAfterDiscount || 0);
+    return Math.floor(subtotal * 0.20);
+  },
+
+  redeem: async (points, description = 'Points redemption') => {
     try {
-      const subtotal = Number(subtotalAfterDiscount || 0);
-      if (!Number.isFinite(subtotal) || subtotal <= 0) {
-        return { success: true, data: { points_earned: 0 } };
-      }
-      const points = Math.floor(subtotal * 0.20); // 20% earn rate
-      return { success: true, data: { points_earned: points } };
+      const response = await apiClient.post('/web/loyalty/redeem/', { points_to_redeem: points, description });
+      return { success: true, ...response.data };
     } catch (error) {
-      console.error('[LOYALTY] calculatePointsEarned error:', error);
-      return { success: false, error: error.message || 'Failed to calculate points earned' };
+      const errMsg = error.response?.data?.error || error.message || 'Failed to redeem points';
+      console.error('[LOYALTY] redeem error:', errMsg);
+      return { success: false, error: errMsg };
     }
   },
 
-  // Get current loyalty tier (local fallback)
-  getCurrentTier: async (customerId = null) => {
+  award: async (orderAmount, description = 'Points earned from order') => {
     try {
-      if (customerId) {
-        try {
-          const response = await apiClient.get(`/customers/${customerId}/loyalty/tier/`);
-          return { success: true, ...response.data };
-        } catch (err) {
-          console.warn('[LOYALTY] Backend tier fetch failed, using fallback', err?.response?.data || err.message);
-        }
-      }
-
-      return {
-        success: true,
-        tier: {
-          name: 'Bronze',
-          level: 1,
-          min_points: 0,
-          max_points: 999,
-          benefits: ['Basic rewards']
-        },
-        message: 'Using local fallback - backend endpoint not available'
-      };
+      const response = await apiClient.post('/web/loyalty/award/', { order_amount: orderAmount, description });
+      return { success: true, ...response.data };
     } catch (error) {
-      console.error('[LOYALTY] getCurrentTier error:', error);
-      return { success: false, error: error.message || 'Failed to fetch current tier' };
+      console.error('[LOYALTY] award error:', error);
+      return { success: false, error: error.message || 'Failed to award points' };
     }
-  }
+  },
+
+  getCurrentTier: () => ({
+    success: true,
+    tier: { name: 'Bronze', level: 1, min_points: 0, max_points: 999, benefits: ['Basic rewards'] }
+  }),
 };
 
 // ============================================================================
@@ -626,14 +666,8 @@ export const promotionsAPI = {
 // ============================================================================
 export const newsletterAPI = {
   // eslint-disable-next-line no-unused-vars
-  subscribe: async (email) => {
-    try {
-      console.warn('[NEWSLETTER] subscribe endpoint not implemented in backend');
-      return { message: 'Newsletter subscription not available' };
-    } catch (error) {
-      console.error('[NEWSLETTER] subscribe error:', error);
-      return { success: false, error: 'Failed to subscribe' };
-    }
+  subscribe: async (_email) => {
+    return { message: 'Newsletter subscription not available' };
   }
 };
 
@@ -642,14 +676,8 @@ export const newsletterAPI = {
 // ============================================================================
 export const contactAPI = {
   // eslint-disable-next-line no-unused-vars
-  sendMessage: async (messageData) => {
-    try {
-      console.warn('[CONTACT] sendMessage endpoint not implemented in backend');
-      return { message: 'Contact form not available' };
-    } catch (error) {
-      console.error('[CONTACT] sendMessage error:', error);
-      return { success: false, error: 'Failed to send message' };
-    }
+  sendMessage: async (_messageData) => {
+    return { message: 'Contact form not available' };
   }
 };
 

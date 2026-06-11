@@ -45,26 +45,21 @@ export function useLoyalty() {
     try {
       isLoading.value = true
       error.value = null
-      
-      // Check if user is authenticated
+
       const token = localStorage.getItem('access_token')
       if (!token) {
         loyaltyBalance.value = 0
         return { success: true, data: { balance: 0 } }
       }
-      
-      // Loyalty points come from user profile, not a separate endpoint
-      // The endpoints /customer/loyalty/* don't exist in the backend
-      // Points are fetched via authAPI.getProfile() and stored in userProfile.loyalty_points
-      console.log('💎 Loyalty balance from user profile (no separate API call needed)')
-      
-      // Return success without making API call
-      // The actual balance will be set from userProfile.loyalty_points in Cart.vue
+
+      const result = await loyaltyAPI.getBalance()
+      if (result.success && result.data) {
+        loyaltyBalance.value = result.data.balance ?? loyaltyBalance.value
+      }
       return { success: true, data: { balance: loyaltyBalance.value } }
     } catch (err) {
       error.value = err.message
-      loyaltyBalance.value = 0
-      return { success: true, data: { balance: 0 } }
+      return { success: true, data: { balance: loyaltyBalance.value } }
     } finally {
       isLoading.value = false
     }
@@ -76,24 +71,22 @@ export function useLoyalty() {
    * @param {Object} filters - Filter options
    * @returns {Promise<Object>} History result
    */
-  // eslint-disable-next-line no-unused-vars
   const getLoyaltyHistory = async (filters = {}) => {
     try {
       isLoading.value = true
       error.value = null
-      
-      // Check if user is authenticated
+
       const token = localStorage.getItem('access_token')
       if (!token) {
         loyaltyHistory.value = []
         return { success: true, data: [] }
       }
-      
-      // Loyalty history endpoint doesn't exist in backend
-      // Return empty history without making API call
-      console.log('📜 Loyalty history not available (no backend endpoint)')
-      loyaltyHistory.value = []
-      return { success: true, data: [] }
+
+      const result = await loyaltyAPI.getHistory(filters.limit || 50)
+      if (result.success && result.data) {
+        loyaltyHistory.value = result.data.history?.transactions || result.data.transactions || []
+      }
+      return { success: true, data: loyaltyHistory.value }
     } catch (err) {
       error.value = err.message
       loyaltyHistory.value = []
@@ -112,13 +105,11 @@ export function useLoyalty() {
       isLoading.value = true
       error.value = null
       
-      console.log('👑 Fetching loyalty tiers')
       
       const result = await loyaltyAPI.getTiers()
       
       if (result.success) {
         loyaltyTiers.value = result.data?.tiers || result.tiers || []
-        console.log(`✅ Fetched ${loyaltyTiers.value.length} loyalty tiers`)
         return { success: true, data: loyaltyTiers.value }
       } else {
         throw new Error(result.error || 'Failed to fetch loyalty tiers')
@@ -151,7 +142,6 @@ export function useLoyalty() {
       
       // Loyalty tier endpoint doesn't exist in backend
       // Use default Bronze tier without making API call
-      console.log('👑 Using default Bronze tier (no backend endpoint)')
       currentTier.value = { name: 'Bronze', min_points: 0, max_points: 499, multiplier: 1.0 }
       return { success: true, data: currentTier.value }
     } catch (err) {
@@ -174,13 +164,11 @@ export function useLoyalty() {
    */
   const calculatePointsEarned = async (subtotalAfterDiscount) => {
     try {
-      console.log('🧮 Calculating loyalty points earned for subtotal:', subtotalAfterDiscount)
       
       // apiLoyalty.calculatePointsEarned returns a number directly, not an object
       const points = loyaltyAPI.calculatePointsEarned(subtotalAfterDiscount)
       
       if (typeof points === 'number' && points >= 0) {
-        console.log(`✅ Points earned: ${points}`)
         return { success: true, data: { points_earned: points } }
       } else {
         throw new Error('Invalid points calculation result')
@@ -224,12 +212,10 @@ export function useLoyalty() {
    */
   const validatePointsRedemption = async (customerId, pointsToRedeem, subtotal) => {
     try {
-      console.log('🔍 Validating points redemption:', { customerId, pointsToRedeem, subtotal })
       
       const result = await loyaltyAPI.validateRedemption(pointsToRedeem, subtotal, customerId)
       
       if (result.success) {
-        console.log('✅ Points redemption validation successful')
         return { success: true, data: result.data }
       } else {
         throw new Error(result.error || 'Points redemption validation failed')
@@ -249,7 +235,6 @@ export function useLoyalty() {
    */
   const redeemPoints = async (pointsToRedeem, customerId, options = {}) => {
     try {
-      console.log('💎 Redeeming loyalty points from DATABASE:', { pointsToRedeem, customerId, options })
       
       // Call backend API to redeem points (saves to MongoDB)
       const result = await loyaltyAPI.redeemPoints(pointsToRedeem, options.order_id)
@@ -258,7 +243,6 @@ export function useLoyalty() {
         // Update local balance from database response
         loyaltyBalance.value = result.data.new_balance
         
-        console.log('✅ Points redeemed successfully in DATABASE, new balance:', loyaltyBalance.value)
         return { 
           success: true, 
           data: { 
@@ -272,7 +256,6 @@ export function useLoyalty() {
     } catch (err) {
       console.error('❌ Error redeeming points from DATABASE:', err)
       // Fallback: Update locally only if backend fails
-      console.warn('⚠️ Using local fallback for points redemption')
       loyaltyBalance.value = Math.max(0, loyaltyBalance.value - pointsToRedeem)
       return { 
         success: true, 
@@ -291,7 +274,6 @@ export function useLoyalty() {
    */
   const awardPoints = async (pointsToAward, customerId, options = {}) => {
     try {
-      console.log('🎁 Awarding loyalty points to DATABASE:', { orderAmount: pointsToAward, customerId, options })
       
       // Call backend API to award points (saves to MongoDB)
       // The backend expects order_amount and calculates points (20% rule)
@@ -314,11 +296,6 @@ export function useLoyalty() {
         
         loyaltyHistory.value.unshift(newTransaction)
         
-        console.log('✅ Points awarded successfully in DATABASE:', {
-          pointsAwarded: actualPointsAwarded,
-          newBalance: loyaltyBalance.value,
-          orderAmount: pointsToAward
-        })
         return { 
           success: true, 
           award: result.award || { 
@@ -336,7 +313,6 @@ export function useLoyalty() {
     } catch (err) {
       console.error('❌ Error awarding points to DATABASE:', err)
       // Fallback: Update locally only if backend fails
-      console.warn('⚠️ Using local fallback for points award')
       const pointsToAdd = Math.floor(pointsToAward * 0.20) // Calculate 20% locally
       loyaltyBalance.value += pointsToAdd
       
@@ -370,7 +346,6 @@ export function useLoyalty() {
    */
   const setLoyaltyBalance = (points) => {
     loyaltyBalance.value = points || 0
-    console.log('💎 Loyalty balance set from user profile:', loyaltyBalance.value)
   }
 
   /**
