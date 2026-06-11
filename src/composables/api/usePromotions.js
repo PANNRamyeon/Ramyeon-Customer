@@ -45,7 +45,6 @@ export function usePromotions() {
       isLoading.value = true
       error.value = null
       
-      console.log('🎯 Fetching promotions with filters:', filters)
       
       const result = await promotionsAPI.getActive(filters)
       
@@ -53,7 +52,6 @@ export function usePromotions() {
         promotions.value = result.promotions || result.data?.results || result.data || []
         lastFetchTime.value = Date.now()
         
-        console.log(`✅ Fetched ${promotions.value.length} promotions`)
         return { success: true, data: promotions.value }
       } else {
         throw new Error(result.error || 'Failed to fetch promotions')
@@ -77,7 +75,6 @@ export function usePromotions() {
       isLoading.value = true;
       error.value = null;
 
-      console.log('🎯 Fetching active promotions');
 
       const result = await promotionsAPI.getActive(filters);
 
@@ -93,7 +90,6 @@ export function usePromotions() {
         activePromotions.value = fetchedPromotions;
         promotions.value = fetchedPromotions; // keep in sync
 
-        console.log(`✅ Filtered and loaded ${fetchedPromotions.length} active promotions`);
 
         return { success: true, data: fetchedPromotions };
       } else {
@@ -156,7 +152,6 @@ export function usePromotions() {
       isValidating.value = true
       validationError.value = null
       
-      console.log('🔍 Validating promotion code locally:', code)
       
       // Find promotion in active promotions
       const promotion = activePromotions.value.find(p => 
@@ -187,7 +182,6 @@ export function usePromotions() {
         throw new Error('Promotion has expired')
       }
       
-      console.log('✅ Promotion validation successful (local)')
       return { 
         success: true, 
         data: { 
@@ -259,10 +253,8 @@ export function usePromotions() {
   const applyPromotion = async (promotion, cartItems = [], context = {}) => {
     try {
       if (!promotion) {
-        console.warn('applyPromotion called with undefined promotion');
         return { success: false, error: 'Promotion not found' };
       }
-      console.log('🎯 Applying promotion:', promotion.name)
       
       // Validate promotion first
       const validation = await validatePromotion(promotion.code || promotion.name)
@@ -300,7 +292,6 @@ export function usePromotions() {
    */
   const removePromotion = (promotionId) => {
     try {
-      console.log('🗑️ Removing promotion:', promotionId)
       
       // Find and remove promotion
       const index = activePromotions.value.findIndex(p => 
@@ -311,7 +302,6 @@ export function usePromotions() {
       
       if (index > -1) {
         activePromotions.value.splice(index, 1)
-        console.log('✅ Promotion removed successfully')
         return { success: true, message: 'Promotion removed' }
       } else {
         throw new Error('Promotion not found')

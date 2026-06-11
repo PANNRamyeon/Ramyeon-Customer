@@ -66,14 +66,26 @@
   border: 2px solid rgba(255, 111, 97, 0.2);
   border-radius: 30px;
   padding: 50px 40px;
-  text-align: center;
   position: relative;
   overflow: hidden;
-  box-shadow: 
+  box-shadow:
     0 8px 32px rgba(255, 111, 97, 0.2),
     inset 0 1px 0 rgba(255, 255, 255, 0.8);
   margin-bottom: 40px;
   animation: slideInDown 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+}
+
+.profile-header-left {
+  flex: 1;
+  text-align: center;
+}
+
+.profile-header-right {
+  flex-shrink: 0;
 }
 
 @keyframes slideInDown {

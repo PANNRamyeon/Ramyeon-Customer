@@ -302,6 +302,19 @@
           ></textarea>
         </div>
 
+        <!-- Active Order Warning -->
+        <div v-if="activeOrder" class="active-order-warning">
+          <div class="warning-icon">⚠️</div>
+          <div class="warning-content">
+            <strong>You have an ongoing order</strong>
+            <p>
+              Order <span class="warning-order-id">{{ activeOrder.order_id }}</span>
+              is currently <span class="warning-status">{{ activeOrder.status }}</span>.
+              Please wait for it to be completed or cancel it before placing a new order.
+            </p>
+          </div>
+        </div>
+
         <!-- Checkout Button -->
         <div class="checkout-section">
           <button class="checkout-btn" @click="proceedToCheckout" :disabled="!canCheckout">
@@ -413,7 +426,7 @@
 
 <script>
 import { paymongoAPI } from '../composables/usePaymongo.js';
-import { authAPI } from '../services/api.js';
+import { authAPI, ordersAPI } from '../services/api.js';
 import { useOnlineOrder } from '../composables/api/useOnlineOrder.js';
 import { useProducts } from '../composables/api/useProducts.js';
 import { usePromotions } from '../composables/api/usePromotions.js';
@@ -481,7 +494,9 @@ export default {
       pendingOrder: null,
       pendingOrderKey: 'ramyeon_pending_order',
       // 🌍 Global / auto promotions (subset of activePromotions)
-      globalPromotions: []
+      globalPromotions: [],
+      activeOrder: null,
+      checkingActiveOrder: false,
     };
   },
   computed: {
@@ -521,7 +536,7 @@ export default {
       const hasAddress =
         this.deliveryType === 'pickup' ||
         (this.deliveryType === 'delivery' && this.deliveryAddress.trim() !== '');
-      return hasItems && hasPayment && hasAddress && !this.isProcessing;
+      return hasItems && hasPayment && hasAddress && !this.isProcessing && !this.activeOrder;
     }
   },
   methods: {
@@ -552,9 +567,28 @@ export default {
 
         return true;
       });
+    },
 
-      if (CART_DEBUG) {
-        console.log('🌍 Derived globalPromotions:', this.globalPromotions);
+    // Check for loyalty points intent pre-selected from profile (localStorage)
+    checkForLoyaltyIntent() {
+      try {
+        const intent = localStorage.getItem('ramyeon_use_loyalty_points')
+        if (!intent) return
+        localStorage.removeItem('ramyeon_use_loyalty_points')
+
+        const { points } = JSON.parse(intent)
+        const userPoints = this.userProfile?.loyalty_points || 0
+        if (!points || points < 40 || userPoints < 40) return
+
+        this.useLoyaltyPoints = true
+        this.onPointsToggle()
+        this.$nextTick(() => {
+          this.setPoints(Math.min(points, this.maxPointsToRedeem || 80))
+          this.validatePointsInput()
+        })
+        this.showSuccessNotification(`${points} loyalty points applied to this order!`)
+      } catch (e) {
+        localStorage.removeItem('ramyeon_use_loyalty_points')
       }
     },
 
@@ -565,10 +599,6 @@ export default {
         if (selectedVoucher) {
           const voucher = JSON.parse(selectedVoucher);
           
-          if (CART_DEBUG) {
-            console.log('🎫 Voucher selected from profile:', voucher);
-          }
-          
           this.appliedPromotion = voucher;
           this.promotionDiscount = this.computePromotionDiscount(voucher);
           this.promoCode = voucher.code || voucher.name || '';
@@ -578,10 +608,6 @@ export default {
           );
           
           localStorage.removeItem('ramyeon_selected_voucher');
-          
-          if (CART_DEBUG) {
-            console.log('✅ Auto-applied voucher from profile:', this.getVoucherDisplayName(voucher));
-          }
         }
       } catch (error) {
         console.error('Error applying selected voucher:', error);
@@ -625,9 +651,6 @@ export default {
     // Promotion discount at order level
     computePromotionDiscount(promotion) {
       if (!promotion || !Array.isArray(this.cartItems) || this.cartItems.length === 0) {
-        if (CART_DEBUG) {
-          console.log('❌ No promotion or cart items for discount calculation');
-        }
         return 0;
       }
       
@@ -635,35 +658,22 @@ export default {
       
       // Profile vouchers
       if (promotion.discount_value !== undefined && promotion.type === undefined) {
-        if (CART_DEBUG) {
-          console.log('💰 Profile voucher detected with discount:', promotion.discount_value);
-        }
         return Math.min(promotion.discount_value, this.subtotal);
       }
       
       if (promotion.discount && typeof promotion.discount === 'string' && promotion.discount.includes('%')) {
         const percentage = parseFloat(promotion.discount.replace('%', ''));
-        if (CART_DEBUG) {
-          console.log('📊 Percentage profile voucher detected:', percentage + '%');
-        }
         const discount = (this.subtotal * percentage / 100);
         return Math.min(discount, this.subtotal);
       }
       
       if (promotion.discount && typeof promotion.discount === 'number') {
-        if (CART_DEBUG) {
-          console.log('💰 Fixed amount profile voucher detected:', promotion.discount);
-        }
         return Math.min(promotion.discount, this.subtotal);
       }
       
       // Backend promotions
       for (const item of this.cartItems) {
         total += this.getItemDiscountForPromotion(item, promotion);
-      }
-      
-      if (CART_DEBUG) {
-        console.log('🎯 Promotion discount calculated:', total);
       }
       return Math.max(0, total);
     },
@@ -696,10 +706,6 @@ export default {
         discountAmount = (originalPrice * (promotion.discount_value / 100)) * quantity;
       } else if (promotion.type === 'fixed_amount') {
         discountAmount = Math.min(promotion.discount_value, originalPrice) * quantity;
-      }
-
-      if (CART_DEBUG) {
-        console.log('🛒 Item discount for', item.name, ':', discountAmount);
       }
       return Math.max(0, discountAmount);
     },
@@ -876,14 +882,6 @@ export default {
     },
     
     async updatePointsDiscount() {
-      if (CART_DEBUG) {
-      console.log('💎 updatePointsDiscount called:', {
-        useLoyaltyPoints: this.useLoyaltyPoints,
-        pointsToRedeem: this.pointsToRedeem,
-        pointsApplied: this.pointsApplied,
-        type: typeof this.pointsToRedeem
-      });
-      }
       
       if (
         this.pointsApplied &&
@@ -945,10 +943,6 @@ export default {
           this.promotionDiscount = result.data.discount_amount;
           this.promoError = null;
           
-          if (CART_DEBUG) {
-            console.log('✅ Promotion applied! Discount:', this.promotionDiscount);
-          }
-          
           this.showSuccessNotification(
             `Promo code applied! You saved ₱${this.promotionDiscount.toFixed(2)}`
           );
@@ -986,31 +980,14 @@ export default {
         if (this.cartStore?.selectedVoucher) {
           const voucher = this.cartStore.selectedVoucher;
 
-          if (CART_DEBUG) {
-          console.log('✅ User-selected voucher detected:', {
-              name: this.getVoucherDisplayName(voucher),
-              type: voucher.type
-          });
-          }
-
           this.appliedPromotion = voucher;
           this.promotionDiscount = this.computePromotionDiscount(voucher);
-
-          if (CART_DEBUG) {
-          console.log('✅ Voucher applied:', {
-              name: this.getVoucherDisplayName(voucher),
-            discount: this.promotionDiscount
-          });
-          }
 
           return;
         }
 
         // 2. If a manual promo code / voucher already applied, don't override
         if (this.appliedPromotion) {
-          if (CART_DEBUG) {
-            console.log('✅ Manual or profile voucher already applied, skipping auto-apply');
-          }
           return;
         }
 
@@ -1049,13 +1026,6 @@ export default {
         if (bestPromotion && bestDiscount > 0) {
           this.appliedPromotion = bestPromotion;
           this.promotionDiscount = bestDiscount;
-
-          if (CART_DEBUG) {
-          console.log('✅ Auto-applied best promotion:', {
-              name: this.getVoucherDisplayName(bestPromotion),
-            discount: bestDiscount
-          });
-          }
         } else {
           this.appliedPromotion = null;
           this.promotionDiscount = 0;
@@ -1095,15 +1065,8 @@ export default {
     
     // Per-item discount calculation
     getItemDiscount(item) {
-      if (CART_DEBUG) {
-        console.log('🔍 Checking discount for item:', item.name, 'Price:', item.price);
-      }
       
       const applicablePromotion = this.getApplicablePromotionForItem(item);
-
-      if (CART_DEBUG) {
-        console.log('✅ Applicable promotion for', item.name, ':', applicablePromotion);
-      }
       
       if (!applicablePromotion) {
         return 0;
@@ -1295,7 +1258,7 @@ export default {
         }
 
         const script = document.createElement('script');
-        script.src = 'https://maps.googleapis.com/maps/api/js?key=AIzaSyAmv6-w1GHQ7Z4Y7c_iOlr17iw6Z6pnmC0&libraries=places&callback=initMap';
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.VUE_APP_GOOGLE_MAPS_KEY}&libraries=places&callback=initMap`;
         script.async = true;
         script.defer = true;
         
@@ -1347,8 +1310,7 @@ export default {
               this.map.setCenter(userLocation);
               this.placeMarker(userLocation);
             },
-            error => {
-              console.log('Geolocation error:', error);
+            () => {
               this.placeMarker(defaultCenter);
             }
           );
@@ -1423,18 +1385,15 @@ export default {
     // Payment and checkout methods
     async proceedToCheckout() {
       if (!this.canCheckout) {
-        console.warn('⚠️ Cannot checkout - validation failed');
         return;
       }
 
       if (this.isProcessing) {
-        console.warn('⚠️ Already processing order');
         return;
       }
 
       try {
         this.isProcessing = true;
-        console.log('🛒 Starting checkout process...');
 
         if (!this.userProfile || !this.userProfile.id) {
           throw new Error('Please log in to place an order');
@@ -1481,21 +1440,30 @@ export default {
           promotion_id: this.appliedPromotion?.id || this.appliedPromotion?._id || null
         };
 
-        console.log('📦 Order data prepared:', orderData);
+        console.log('📦 [Cart] Order data prepared:', JSON.stringify(orderData, null, 2));
+        console.log('📦 [Cart] customer_id:', orderData.customer_id);
+        console.log('📦 [Cart] items count:', orderData.items.length);
+        console.log('📦 [Cart] payment_method:', orderData.payment_method);
+        console.log('📦 [Cart] delivery_type:', orderData.delivery_type);
+        console.log('📦 [Cart] total_amount:', orderData.total_amount);
+        console.log('📦 [Cart] points_to_redeem:', orderData.points_to_redeem);
 
         if (this.paymentMethod === 'cash') {
           const result = await this.createOrder(orderData);
-          
+          console.log('📥 [Cart] createOrder result (cash):', JSON.stringify(result, null, 2));
+
           if (result.success) {
+            const orderId = result.data.id || result.data.order_id || result.data.transaction_id;
+            console.log('✅ [Cart] Order placed — orderId:', orderId);
             this.confirmedOrder = {
-              id: result.data.id || result.data.order_id,
+              id: orderId,
               total: finalTotal.toFixed(2),
               paymentMethod: this.paymentMethod,
               deliveryType: this.deliveryType,
-              pointsEarned: result.data.points_earned || 0,
+              pointsEarned: result.data.order?.loyalty?.points_earned || 0,
               pointsUsed: orderData.points_to_redeem || 0
             };
-            
+            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
             this.clearCart();
             localStorage.removeItem('ramyeon_cart');
             this.$emit('cartCleared');
@@ -1505,17 +1473,21 @@ export default {
           }
         } else if (this.paymentMethod === 'gcash') {
           const result = await this.createOrder(orderData);
-          
+          console.log('📥 [Cart] createOrder result (gcash):', JSON.stringify(result, null, 2));
+
           if (result.success) {
             const orderId =
               result.data?.order_id ||
               result.data?.order?.order_id ||
               result.data?.id ||
+              result.data?.transaction_id ||
               result.data?.order?._id;
+            console.log('✅ [Cart] Order placed (gcash) — orderId:', orderId);
 
+            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
             this.savePendingOrder(orderId, finalTotal);
             const paymentSource = await this.processGCashPayment(orderId);
-            
+
             if (paymentSource && paymentSource.checkout_url) {
               window.location.href = paymentSource.checkout_url;
             } else {
@@ -1526,17 +1498,21 @@ export default {
           }
         } else if (this.paymentMethod === 'card') {
           const result = await this.createOrder(orderData);
-          
+          console.log('📥 [Cart] createOrder result (card):', JSON.stringify(result, null, 2));
+
           if (result.success) {
             const orderId =
               result.data?.order_id ||
               result.data?.order?.order_id ||
               result.data?.id ||
+              result.data?.transaction_id ||
               result.data?.order?._id;
+            console.log('✅ [Cart] Order placed (card) — orderId:', orderId);
 
+            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
             this.savePendingOrder(orderId, finalTotal);
             const paymentSource = await this.processCardPayment(orderId);
-            
+
             if (paymentSource && paymentSource.checkout_url) {
               window.location.href = paymentSource.checkout_url;
             } else {
@@ -1547,17 +1523,21 @@ export default {
           }
         } else if (this.paymentMethod === 'grabpay') {
           const result = await this.createOrder(orderData);
-          
+          console.log('📥 [Cart] createOrder result (grabpay):', JSON.stringify(result, null, 2));
+
           if (result.success) {
             const orderId =
               result.data?.order_id ||
               result.data?.order?.order_id ||
               result.data?.id ||
+              result.data?.transaction_id ||
               result.data?.order?._id;
+            console.log('✅ [Cart] Order placed (grabpay) — orderId:', orderId);
 
+            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
             this.savePendingOrder(orderId, finalTotal);
             const paymentSource = await this.processGrabPayPayment(orderId);
-            
+
             if (paymentSource && paymentSource.checkout_url) {
               window.location.href = paymentSource.checkout_url;
             } else {
@@ -1568,17 +1548,18 @@ export default {
           }
         } else {
           const result = await this.createOrder(orderData);
-          
+
           if (result.success) {
+            const orderId = result.data.id || result.data.order_id || result.data.order?.order_id;
             this.confirmedOrder = {
-              id: result.data.id || result.data.order_id || result.data.order?.order_id,
+              id: orderId,
               total: finalTotal.toFixed(2),
               paymentMethod: this.paymentMethod,
               deliveryType: this.deliveryType,
-              pointsEarned: result.data.points_earned || result.data.order?.loyalty_points_earned || 0,
+              pointsEarned: result.data.order?.loyalty?.points_earned || 0,
               pointsUsed: orderData.points_to_redeem || 0
             };
-            
+            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
             this.clearCart();
             localStorage.removeItem('ramyeon_cart');
             this.showOrderConfirmation = true;
@@ -1694,11 +1675,9 @@ export default {
         hashParams.get('order_id');
       
       if (paymentStatus && orderId) {
-        console.log('💳 Payment return detected:', { paymentStatus, orderId });
         const pendingOrder = this.loadPendingOrder(orderId);
         
         if (paymentStatus === 'success') {
-          console.log('✅ Payment marked as success. Pending order:', pendingOrder);
           
           this.confirmedOrder = {
             id: orderId,
@@ -1722,21 +1701,36 @@ export default {
     },
     
     closeConfirmationModal() {
-      console.log('🚪 Closing confirmation modal');
       this.showOrderConfirmation = false;
       
       window.location.hash = '#/cart';
-      console.log('✅ URL cleaned, staying on cart');
     },
     
     goToHome() {
-      console.log('🏠 Going to home');
       this.showOrderConfirmation = false;
       
       window.location.hash = '#/';
       this.$emit('setCurrentPage', 'Home');
     },
     
+    async checkActiveOrder() {
+      this.checkingActiveOrder = true;
+      try {
+        const result = await ordersAPI.getAll(10);
+        const orders = result?.results || [];
+        const activeStatuses = new Set(['pending', 'confirmed', 'processing', 'preparing', 'on_the_way']);
+        const found = orders.find(o => activeStatuses.has(o?.order?.status));
+        this.activeOrder = found
+          ? { order_id: found.transaction_id, status: found.order?.status }
+          : null;
+      } catch (err) {
+        console.error('[Cart] checkActiveOrder failed:', err);
+        this.activeOrder = null;
+      } finally {
+        this.checkingActiveOrder = false;
+      }
+    },
+
     async loadUserProfile() {
       try {
         this.isUserLoading = true;
@@ -1749,7 +1743,6 @@ export default {
           response;
         
         if (!customer) {
-          console.warn('⚠ No customer data returned from getProfile()');
           return;
         }
 
@@ -1762,7 +1755,6 @@ export default {
           deliveryAddress: customer.delivery_address || {}
         };
 
-        console.log('✅ Loaded user profile:', this.userProfile);
 
       } catch (err) {
         console.error('❌ Error loading user profile:', err);
@@ -1774,15 +1766,12 @@ export default {
   },
 
   async mounted() {
-    console.log('🔧 Cart component mounted');
-    console.log('Full URL:', window.location.href);
 
     const hasPaymentParams =
       window.location.hash.includes('payment=') ||
       window.location.search.includes('payment=');
     
     if (hasPaymentParams) {
-      console.log('🔍 Payment params detected in URL, checking payment return...');
       setTimeout(() => {
         this.checkPaymentReturn();
       }, 100);
@@ -1797,10 +1786,12 @@ export default {
     }
     
     await this.loadUserProfile();
+    await this.checkActiveOrder();
 
-    // Check for voucher from Profile before loading cart
+    // Check for voucher or loyalty intent from Profile before loading cart
     this.checkForSelectedVoucher();
-    
+    this.checkForLoyaltyIntent();
+
     const savedCart = localStorage.getItem('ramyeon_cart');
     if (CART_DEBUG) {
       console.log('[Cart] Loading cart from localStorage:', savedCart ? 'Found' : 'Empty');
@@ -1817,7 +1808,6 @@ export default {
             console.log('[Cart] Cart loaded:', this.cartItems.length, 'items');
           }
         } else {
-          console.warn('⚠️ Invalid cart data, clearing');
           localStorage.removeItem('ramyeon_cart');
           this.cartItems = [];
         }
@@ -1827,22 +1817,18 @@ export default {
         this.cartItems = [];
       }
     } else {
-      console.log('ℹ️ No saved cart found');
       this.cartItems = [];
     }
     
     if (this.cartItems.length > 0 && this.calculateCartTotals) {
       await this.calculateCartTotals();
-      console.log('💰 Cart totals calculated after loading items');
     }
     
     this.$nextTick(() => {
       this.$forceUpdate();
-      console.log('🔄 Forced cart UI update - displaying:', this.cartItems.length, 'items');
     });
     
     try {
-      console.log('🎁 Loading active promotions for per-item discounts...');
       await this.getActivePromotions();
       
       // Build globalPromotions from activePromotions
@@ -1851,7 +1837,6 @@ export default {
       // Auto-apply best promotion if no voucher (e.g. Drinks Promo)
       await this.autoApplyBestPromotion();
       
-      console.log('✅ Promotions loaded and auto-applied (if applicable)');
     } catch (error) {
       console.error('❌ Error loading promotions:', error);
     }
@@ -2655,6 +2640,47 @@ export default {
   outline: none;
   border-color: #ff4757;
   box-shadow: 0 0 0 3px rgba(255, 71, 87, 0.1);
+}
+
+.active-order-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: #fff8e1;
+  border: 1.5px solid #f59e0b;
+  border-radius: 14px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.active-order-warning .warning-icon {
+  font-size: 1.4rem;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.active-order-warning .warning-content strong {
+  display: block;
+  color: #92400e;
+  font-size: 0.95rem;
+  margin-bottom: 4px;
+}
+
+.active-order-warning .warning-content p {
+  margin: 0;
+  color: #78350f;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.warning-order-id {
+  font-weight: 700;
+  color: #b45309;
+}
+
+.warning-status {
+  font-weight: 600;
+  text-transform: capitalize;
 }
 
 .checkout-section {

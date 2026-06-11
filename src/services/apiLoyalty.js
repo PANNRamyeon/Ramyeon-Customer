@@ -2,7 +2,7 @@
 import apiClient from './api.js';
 
 /**
- * Customer Loyalty Points API - Connected to /api/customer/loyalty/* endpoints
+ * Customer Loyalty Points API - Connected to /api/web/loyalty/* endpoints
  * Handles loyalty points management for customers
  */
 export const loyaltyAPI = {
@@ -24,7 +24,7 @@ export const loyaltyAPI = {
         };
       }
       
-      const response = await apiClient.get('/customer/loyalty/balance/');
+      const response = await apiClient.get('/web/loyalty/balance/');
       return {
         success: true,
         data: response.data
@@ -57,7 +57,7 @@ export const loyaltyAPI = {
         };
       }
       
-      const response = await apiClient.get('/customer/loyalty/history/', {
+      const response = await apiClient.get('/web/loyalty/history/', {
         params: { limit }
       });
       return {
@@ -81,7 +81,7 @@ export const loyaltyAPI = {
    */
   validateRedemption: async (pointsToRedeem) => {
     try {
-      const response = await apiClient.post('/customer/loyalty/validate-redemption/', {
+      const response = await apiClient.post('/web/loyalty/validate-redemption/', {
         points_to_redeem: pointsToRedeem
       });
       return {
@@ -141,7 +141,7 @@ export const loyaltyAPI = {
    */
   redeemPoints: async (pointsToRedeem, orderId) => {
     try {
-      const response = await apiClient.post('/customer/loyalty/redeem/', {
+      const response = await apiClient.post('/web/loyalty/redeem/', {
         points_to_redeem: pointsToRedeem,
         order_id: orderId
       });
@@ -166,7 +166,7 @@ export const loyaltyAPI = {
    */
   awardPoints: async (orderAmount, orderId) => {
     try {
-      const response = await apiClient.post('/customer/loyalty/award/', {
+      const response = await apiClient.post('/web/loyalty/award/', {
         order_amount: orderAmount,
         order_id: orderId
       });
@@ -189,7 +189,7 @@ export const loyaltyAPI = {
    */
   getTiers: async () => {
     try {
-      const response = await apiClient.get('/customer/loyalty/tiers/');
+      const response = await apiClient.get('/web/loyalty/tiers/');
       return {
         success: true,
         data: response.data
@@ -234,7 +234,7 @@ export const loyaltyAPI = {
         };
       }
       
-      const response = await apiClient.get('/customer/loyalty/current-tier/');
+      const response = await apiClient.get('/web/loyalty/current-tier/');
       return {
         success: true,
         data: response.data
@@ -261,7 +261,7 @@ export const loyaltyAPI = {
    */
   healthCheck: async () => {
     try {
-      const response = await apiClient.get('/customer/loyalty/health/');
+      const response = await apiClient.get('/web/loyalty/health/');
       return {
         success: true,
         data: response.data

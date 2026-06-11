@@ -27,28 +27,6 @@ const getPayMongoKeys = () => {
   };
 };
 
-// Get keys dynamically rather than at module load time
-let PAYMONGO_PUBLIC_KEY, PAYMONGO_SECRET_KEY, PAYMONGO_MODE;
-
-// Initialize keys and debug
-const initKeys = () => {
-  const keys = getPayMongoKeys();
-  PAYMONGO_PUBLIC_KEY = keys.publicKey;
-  PAYMONGO_SECRET_KEY = keys.secretKey;
-  PAYMONGO_MODE = keys.mode;
-  
-  // Debug summary
-  console.log('PayMongo Config:', {
-    hasPublicKey: !!PAYMONGO_PUBLIC_KEY,
-    hasSecretKey: !!PAYMONGO_SECRET_KEY,
-    mode: PAYMONGO_MODE,
-    publicKeyPreview: PAYMONGO_PUBLIC_KEY ? `${PAYMONGO_PUBLIC_KEY.substring(0, 10)}...` : 'undefined',
-  });
-};
-
-// Initialize keys
-initKeys();
-
 // PayMongo API base URL
 const PAYMONGO_API_URL = 'https://api.paymongo.com/v1';
 
@@ -137,7 +115,6 @@ export const processGCashPayment = async ({ amount, orderId, customerEmail, cust
     }
 
     const data = await response.json();
-    console.log('GCash payment source created:', data);
     return data;
   } catch (error) {
     console.error('GCash payment error:', error);
@@ -193,7 +170,6 @@ export const processPayMayaPayment = async ({ amount, orderId, customerEmail, cu
       
       // If 'maya' source type fails, fall back to payment links
       if (error.errors?.[0]?.detail?.includes('source_type') || error.errors?.[0]?.detail?.includes('invalid')) {
-        console.log('Maya source type not supported, falling back to payment links');
         return await processPayMayaPaymentLink({ amount, orderId, customerEmail, customerName });
       }
       
@@ -201,7 +177,6 @@ export const processPayMayaPayment = async ({ amount, orderId, customerEmail, cu
     }
 
     const data = await response.json();
-    console.log('PayMaya payment source created:', data);
     return data;
   } catch (error) {
     console.error('PayMaya payment error:', error);
@@ -257,7 +232,6 @@ async function processPayMayaPaymentLink({ amount, orderId, customerEmail, custo
   }
 
   const data = await response.json();
-  console.log('PayMaya payment link created:', data);
   
   return {
     data: {
@@ -318,7 +292,6 @@ export const processCardPayment = async ({ amount, orderId }) => {
     }
 
     const data = await response.json();
-    console.log('Card payment link created:', data);
     
     // Convert payment link response to match source response format
     return {
@@ -388,7 +361,6 @@ export const processGrabPayPayment = async ({ amount, orderId, customerEmail, cu
     }
 
     const data = await response.json();
-    console.log('GrabPay payment source created:', data);
     return data;
   } catch (error) {
     console.error('GrabPay payment error:', error);
