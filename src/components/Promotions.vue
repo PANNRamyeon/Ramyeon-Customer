@@ -393,10 +393,7 @@ export default {
     },
     async fetchActivePromotions() {
       try {
-        console.log('🎯 Fetching active promotions using composable...')
         await this.getActivePromotions()
-        console.log('✅ Loaded', this.promotions.length, 'active promotions')
-        console.log('Promotions:', this.promotions)
       } catch (error) {
         console.error('❌ Error fetching promotions:', error)
         this.showErrorMessage('Could not load promotions. Please try again later.')
@@ -534,7 +531,6 @@ export default {
         
         if (!fullPromotion) {
           // Fallback: try to fetch from API
-          console.log('Promotion not found in active list, fetching from API...')
           try {
             const response = await this.getPromotion(code)
             
@@ -577,7 +573,6 @@ export default {
         savedVouchers.push(promotionVoucher)
         localStorage.setItem('ramyeon_saved_vouchers', JSON.stringify(savedVouchers))
 
-        console.log('✅ Promotion saved:', promotionVoucher)
 
         // Show success message
         this.showSuccessMessage('Promotion saved! Redirecting to profile...')

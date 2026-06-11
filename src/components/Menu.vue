@@ -2,13 +2,8 @@
   <div class="menu-page">
     <h1>Menu</h1>
     
-    <!-- Loading State -->
-    <div v-if="loading || isLoading" class="loading-state">
-      <p>Loading menu...</p>
-    </div>
-
     <!-- Error State -->
-    <div v-else-if="error" class="error-state">
+    <div v-if="error" class="error-state">
       <p>{{ error }}</p>
       <button @click="fetchData">Retry</button>
     </div>
@@ -32,8 +27,36 @@
         </button>
       </div>
 
-      <div v-if="loadingProducts || isProductsLoading" class="loading-products">
-        <p>Loading products...</p>
+      <!-- Subcategory Row -->
+      <div v-if="currentSubcategories.length > 0" class="subcategories">
+        <button
+          :class="{ active: selectedSubcategory === null }"
+          @click="selectSubcategory(null)"
+        >
+          All
+        </button>
+        <button
+          v-for="sub in currentSubcategories"
+          :key="sub.subcategory_id"
+          :class="{ active: selectedSubcategory === sub.name }"
+          @click="selectSubcategory(sub.name)"
+        >
+          {{ sub.name }}
+        </button>
+      </div>
+
+      <!-- Skeleton Loading Grid -->
+      <div v-if="loading || isLoading || loadingProducts || isProductsLoading" class="products-grid">
+        <div class="skeleton-card" v-for="n in pagination.items_per_page" :key="'sk-' + n">
+          <div class="skeleton skeleton-image"></div>
+          <div class="skeleton-body">
+            <div class="skeleton skeleton-title"></div>
+            <div class="skeleton skeleton-line"></div>
+            <div class="skeleton skeleton-line short"></div>
+            <div class="skeleton skeleton-price"></div>
+          </div>
+          <div class="skeleton skeleton-btn-circle"></div>
+        </div>
       </div>
 
       <div v-else-if="displayProducts.length === 0" class="no-products">
@@ -43,6 +66,7 @@
       <div v-else class="products-grid">
         <div
           class="product-card"
+          :class="{ 'out-of-stock': getProductStock(product) !== null && getProductStock(product) <= 0 }"
           v-for="product in displayProducts"
           :key="product.id || product._id"
         >
@@ -73,18 +97,44 @@
 
       <!-- Pagination -->
       <div v-if="pagination.total_pages > 1" class="pagination">
-        <button 
-          @click="goToPage(pagination.current_page - 1)" 
+        <button
+          @click="goToPage(1)"
           :disabled="pagination.current_page === 1"
+          title="First page"
+          class="pagination-edge"
+        >
+          «
+        </button>
+        <button
+          @click="goToPage(pagination.current_page - 1)"
+          :disabled="pagination.current_page === 1"
+          title="Previous page"
         >
           Previous
         </button>
-        <span>Page {{ pagination.current_page }} of {{ pagination.total_pages }}</span>
-        <button 
-          @click="goToPage(pagination.current_page + 1)" 
+        <button
+          v-for="page in visiblePages"
+          :key="page"
+          @click="goToPage(page)"
+          :class="{ 'pagination-page-active': page === pagination.current_page }"
+          class="pagination-page"
+        >
+          {{ page }}
+        </button>
+        <button
+          @click="goToPage(pagination.current_page + 1)"
           :disabled="pagination.current_page === pagination.total_pages"
+          title="Next page"
         >
           Next
+        </button>
+        <button
+          @click="goToPage(pagination.total_pages)"
+          :disabled="pagination.current_page === pagination.total_pages"
+          title="Last page"
+          class="pagination-edge"
+        >
+          »
         </button>
       </div>
     </div>
@@ -121,6 +171,7 @@ export default {
       // Keep local state for UI-specific data
       selectedCategory: 'All',
       selectedCategoryName: null,
+      selectedSubcategory: null,
       loading: true,
       loadingProducts: false,
       error: null,
@@ -128,24 +179,33 @@ export default {
         current_page: 1,
         total_pages: 1,
         total_items: 0,
-        items_per_page: 20
+        items_per_page: 12
       }
     };
   },
   computed: {
-    // Show all products (don't filter by stock)
-    // Stock validation happens at add-to-cart time
+    currentSubcategories() {
+      if (this.selectedCategory === 'All') return [];
+      const cat = this.categories.find(c => c._id === this.selectedCategory);
+      return cat?.sub_categories?.filter(s => s.status === 'active') || [];
+    },
+
+    visiblePages() {
+      const current = this.pagination.current_page;
+      const total = this.pagination.total_pages;
+      const start = Math.max(1, current - 3);
+      const end = Math.min(total, current + 3);
+      const pages = [];
+      for (let i = start; i <= end; i++) pages.push(i);
+      return pages;
+    },
+
     displayProducts() {
-      console.log('🔄 Display products computed:', this.products?.length || 0);
-      const allProducts = this.products || [];
-      
-      // Show all products - don't filter by stock
-      // Products with stock <= 0 will have disabled add buttons
-      console.log(`📦 Showing ${allProducts.length} products`);
-      return allProducts;
+      return this.products || [];
     }
   },
   async mounted() {
+    this.clearCache();
     await this.fetchData();
   },
   methods: {
@@ -154,11 +214,7 @@ export default {
       this.error = null;
       
       try {
-        // Fetch categories using composable
         await this.getCategories();
-        console.log('📂 Categories loaded:', this.categories);
-        
-        // Fetch all products initially using composable
         await this.fetchProducts();
         
         this.loading = false;
@@ -175,40 +231,16 @@ export default {
       try {
         let response;
         
-        if (this.selectedCategory === 'All') {
-          // Fetch all products using composable
-          response = await this.getProducts({
-            page: page,
-            limit: this.pagination.items_per_page
-          });
-        } else {
-          // Fetch products by category using composable
-          console.log('🔍 Fetching products for category:', this.selectedCategory);
-          response = await this.getProducts({
-            category: this.selectedCategory,
-            page: page,
-            limit: this.pagination.items_per_page
-          });
+        const filters = { page, limit: this.pagination.items_per_page };
+        if (this.selectedCategory !== 'All') {
+          filters.category = this.selectedCategory;
+          if (this.selectedSubcategory) {
+            filters.subcategory_name = this.selectedSubcategory;
+          }
         }
+        response = await this.getProducts(filters);
         
         if (response.success && response.data) {
-          // Products are already in the composable state
-          console.log('📦 Products updated in composable:', response.data.length);
-          
-          // DEBUG: Check first product's image data
-          if (response.data.length > 0) {
-            const firstProduct = response.data[0];
-            console.log('🖼️ First product image check:', {
-              name: firstProduct.product_name,
-              hasImageUrl: !!firstProduct.image_url,
-              hasImage: !!firstProduct.image,
-              imageUrlType: typeof firstProduct.image_url,
-              imageUrlLength: firstProduct.image_url ? firstProduct.image_url.length : 0,
-              imageUrlPrefix: firstProduct.image_url ? firstProduct.image_url.substring(0, 100) : 'none'
-            });
-          }
-          
-          // Update pagination if available
           if (response.data.pagination) {
             this.pagination = {
               current_page: response.data.pagination.current_page,
@@ -217,8 +249,6 @@ export default {
               items_per_page: response.data.pagination.items_per_page
             };
           }
-        } else {
-          console.warn('⚠️ No products data received:', response);
         }
         
         this.loadingProducts = false;
@@ -229,11 +259,16 @@ export default {
     },
 
     async selectCategory(categoryId, categoryName) {
-      console.log('🎯 Selecting category:', categoryId, categoryName);
-      console.log('🎯 Available categories:', this.categories);
       this.selectedCategory = categoryId;
       this.selectedCategoryName = categoryName;
-      this.pagination.current_page = 1; // Reset to first page
+      this.selectedSubcategory = null;
+      this.pagination = { ...this.pagination, current_page: 1, total_pages: 1, total_items: 0 };
+      await this.fetchProducts(1);
+    },
+
+    async selectSubcategory(subcategoryName) {
+      this.selectedSubcategory = subcategoryName;
+      this.pagination = { ...this.pagination, current_page: 1, total_pages: 1, total_items: 0 };
       await this.fetchProducts(1);
     },
 
@@ -290,8 +325,6 @@ export default {
     },
 
     handleImageError(event) {
-      // Fallback image when product image fails to load
-      console.log('⚠️ Image failed to load, using placeholder');
       event.target.src = require('../assets/Home/BigRamen.png');
     },
     resolveImageSrc(product) {
@@ -309,13 +342,7 @@ export default {
       // 4) Fallback placeholder
       return require('../assets/Home/BigRamen.png');
     },
-    handleImageLoad(product) {
-      console.log('✅ Image loaded for:', product.product_name, {
-        hasImageUrl: !!product.image_url,
-        hasImage: !!product.image,
-        imageUrlPrefix: product.image_url ? product.image_url.substring(0, 50) : 'none'
-      });
-    }
+    handleImageLoad() {}
   },
 };
 </script>

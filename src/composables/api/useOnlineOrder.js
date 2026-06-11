@@ -70,8 +70,7 @@ export function useOnlineOrder() {
     currentTier,
     calculatePointsEarned,
     calculatePointsDiscount,
-    validatePointsRedemption,
-    awardPoints
+    validatePointsRedemption
   } = useLoyalty()
   
   const {
@@ -191,7 +190,6 @@ export function useOnlineOrder() {
       isLoading.value = true
       error.value = null
       
-      console.log('📦 Fetching orders for user:', userId)
       
       // Check cache first
       const cacheKey = `orders_${userId}_${JSON.stringify(filters)}`
@@ -200,7 +198,6 @@ export function useOnlineOrder() {
         const cacheAge = Date.now() - cachedData.timestamp
         
         if (cacheAge < 300000) { // 5 minutes
-          console.log('✅ Using cached orders data')
           orders.value = cachedData.data
           isLoading.value = false
           return { success: true, data: cachedData.data }
@@ -220,7 +217,6 @@ export function useOnlineOrder() {
           timestamp: Date.now()
         })
         
-        console.log(`✅ Fetched ${orders.value.length} orders`)
         return { success: true, data: orders.value }
       } else {
         throw new Error(result.error || 'Failed to fetch orders')
@@ -244,7 +240,6 @@ export function useOnlineOrder() {
       isLoading.value = true
       error.value = null
       
-      console.log('📦 Fetching order:', orderId)
       
       // Check cache first
       if (ordersCache.value.has(orderId)) {
@@ -252,7 +247,6 @@ export function useOnlineOrder() {
         const cacheAge = Date.now() - cachedData.timestamp
         
         if (cacheAge < 300000) { // 5 minutes
-          console.log('✅ Using cached order data')
           currentOrder.value = cachedData.data
           isLoading.value = false
           return { success: true, data: cachedData.data }
@@ -272,7 +266,6 @@ export function useOnlineOrder() {
           timestamp: Date.now()
         })
         
-        console.log('✅ Order fetched successfully')
         return { success: true, data: result.data }
       } else {
         throw new Error(result.error || 'Failed to fetch order')
@@ -296,13 +289,11 @@ export function useOnlineOrder() {
       isLoading.value = true
       error.value = null
       
-      console.log('📊 Fetching order status:', orderId)
       
       const result = await ordersAPI.getStatus(orderId)
       
       if (result.success) {
         orderStatus.value = result.data
-        console.log(`✅ Order status: ${result.data.status}`)
         return { success: true, data: result.data }
       } else {
         throw new Error(result.error || 'Failed to fetch order status')
@@ -332,13 +323,11 @@ export function useOnlineOrder() {
         return { success: true, data: [] }
       }
       
-      console.log('🔍 Searching orders:', query)
       
       const result = await ordersAPI.search(query, userId)
       
       if (result.success) {
         searchResults.value = result.data.results || result.data
-        console.log(`✅ Found ${searchResults.value.length} orders`)
         return { success: true, data: searchResults.value }
       } else {
         throw new Error(result.error || 'Order search failed')
@@ -366,67 +355,42 @@ export function useOnlineOrder() {
       isCreating.value = true
       creationError.value = null
       
-      console.log('🛒 Creating new order:', orderData)
-      
       // Validate stock before creating order (allow fallback to local validation)
       try {
-      const stockValidation = await validateStock(orderData.items)
-      if (!stockValidation.success) {
-          console.warn('⚠️ Stock validation failed, but proceeding with order:', stockValidation.error)
+        const stockValidation = await validateStock(orderData.items)
+        if (!stockValidation.success) {
           // Don't throw - allow order to proceed as stock validation has local fallback
         }
-      } catch (stockError) {
-        console.warn('⚠️ Stock validation error, but proceeding with order:', stockError.message)
+      } catch {
         // Don't throw - allow order to proceed as stock validation has local fallback
       }
-      
+
       // Apply promotions if any
       if (orderData.promotions && orderData.promotions.length > 0) {
         for (const promotionId of orderData.promotions) {
-          const promotionResult = await applyPromotion(promotionId, orderData.items, orderData.user)
-          if (!promotionResult.success) {
-            console.warn('Failed to apply promotion:', promotionId)
-          }
+          await applyPromotion(promotionId, orderData.items, orderData.user)
         }
       }
-      
-      // Calculate loyalty points earned (backend will calculate this, so we can skip or make it optional)
+
+      // Calculate loyalty points earned (backend will calculate this)
       if (orderData.user && orderData.total_amount) {
         try {
-          // Use subtotal after discount for points calculation
           const subtotalAfterDiscount = (orderData.total_amount || 0) - (orderData.discount || 0)
           const pointsResult = await calculatePointsEarned(subtotalAfterDiscount)
-          if (pointsResult && pointsResult.success) {
-            orderData.points_earned = pointsResult.data?.points_earned || pointsResult.data?.points || 0
-          } else {
-            // Points calculation failed, but don't block order
-            console.warn('⚠️ Points calculation failed, but proceeding with order:', pointsResult?.error)
-            orderData.points_earned = 0
-          }
-        } catch (pointsError) {
-          console.warn('⚠️ Points calculation error, but proceeding with order:', pointsError.message)
-          // Don't block order creation if points calculation fails
+          orderData.points_earned = (pointsResult?.success)
+            ? (pointsResult.data?.points_earned || pointsResult.data?.points || 0)
+            : 0
+        } catch {
           orderData.points_earned = 0
         }
       }
-      
+
       // Create order via API
       const result = await ordersAPI.create(orderData)
-      
+
       if (result.success) {
-        // Add to orders list
         orders.value.unshift(result.data)
         currentOrder.value = result.data
-        
-        // Award loyalty points if earned
-        if (orderData.points_earned > 0 && orderData.user) {
-          await awardPoints(orderData.points_earned, orderData.user.id, {
-            order_id: result.data.id,
-            description: `Points earned from order #${result.data.order_number}`
-          })
-        }
-        
-        console.log('✅ Order created successfully')
         return { success: true, data: result.data }
       } else {
         throw new Error(result.error || 'Order creation failed')
@@ -451,7 +415,6 @@ export function useOnlineOrder() {
       isUpdating.value = true
       updateError.value = null
       
-      console.log('📝 Updating order:', orderId)
       
       const result = await ordersAPI.update(orderId, updateData)
       
@@ -466,7 +429,6 @@ export function useOnlineOrder() {
           currentOrder.value = { ...currentOrder.value, ...result.data }
         }
         
-        console.log('✅ Order updated successfully')
         return { success: true, data: result.data }
       } else {
         throw new Error(result.error || 'Order update failed')
@@ -491,7 +453,6 @@ export function useOnlineOrder() {
       isCancelling.value = true
       cancellationError.value = null
       
-      console.log('❌ Cancelling order:', orderId)
       
       const result = await ordersAPI.cancel(orderId, reason)
       
@@ -508,7 +469,6 @@ export function useOnlineOrder() {
           currentOrder.value.cancellation_reason = reason
         }
         
-        console.log('✅ Order cancelled successfully')
         return { success: true, data: result.data }
       } else {
         throw new Error(result.error || 'Order cancellation failed')
@@ -533,7 +493,6 @@ export function useOnlineOrder() {
    */
   const addToCart = async (item) => {
     try {
-      console.log('🛒 Adding item to cart:', item)
       
       // Check stock availability
       const stockCheck = await checkStock(item.product_id, item.quantity)
@@ -560,7 +519,6 @@ export function useOnlineOrder() {
       // Recalculate cart totals
       await calculateCartTotals()
       
-      console.log('✅ Item added to cart')
       return { success: true, data: { item, cartItems: cartItems.value } }
     } catch (err) {
       console.error('❌ Add to cart error:', err)
@@ -575,7 +533,6 @@ export function useOnlineOrder() {
    */
   const removeFromCart = async (productId) => {
     try {
-      console.log('🗑️ Removing item from cart:', productId)
       
       const itemIndex = cartItems.value.findIndex(
         item => item.product_id === productId
@@ -586,7 +543,6 @@ export function useOnlineOrder() {
         
         // Recalculate promotion discounts for all applied promotions
         if (appliedPromotions.value && appliedPromotions.value.length > 0) {
-          console.log('🔄 Recalculating promotion discounts after item removal...')
           
           // Reset cart discount
           cartDiscount.value = 0
@@ -597,10 +553,6 @@ export function useOnlineOrder() {
             promotion.discount_amount = newDiscount
             cartDiscount.value += newDiscount
             
-            console.log('🎯 Updated promotion discount:', {
-              promotion: promotion.name,
-              newDiscount: newDiscount
-            })
           }
           
           // Remove promotions that no longer apply (discount = 0)
@@ -610,7 +562,6 @@ export function useOnlineOrder() {
         // Recalculate cart totals
         await calculateCartTotals()
         
-        console.log('✅ Item removed from cart with promotion recalculation')
         return { success: true, data: { cartItems: cartItems.value } }
       } else {
         throw new Error('Item not found in cart')
@@ -629,7 +580,6 @@ export function useOnlineOrder() {
    */
   const updateCartItemQuantity = async (productId, quantity) => {
     try {
-      console.log('📝 Updating cart item quantity:', productId, quantity)
       
       if (quantity <= 0) {
         return await removeFromCart(productId)
@@ -650,7 +600,6 @@ export function useOnlineOrder() {
         
         // Recalculate promotion discounts for all applied promotions
         if (appliedPromotions.value && appliedPromotions.value.length > 0) {
-          console.log('🔄 Recalculating promotion discounts after quantity change...')
           
           // Reset cart discount
           cartDiscount.value = 0
@@ -661,18 +610,12 @@ export function useOnlineOrder() {
             promotion.discount_amount = newDiscount
             cartDiscount.value += newDiscount
             
-            console.log('🎯 Updated promotion discount:', {
-              promotion: promotion.name,
-              oldDiscount: promotion.discount_amount,
-              newDiscount: newDiscount
-            })
           }
         }
         
         // Recalculate cart totals
         await calculateCartTotals()
         
-        console.log('✅ Cart item quantity updated with promotion recalculation')
         return { success: true, data: { cartItems: cartItems.value } }
       } else {
         throw new Error('Item not found in cart')
@@ -700,7 +643,6 @@ export function useOnlineOrder() {
     // Clear localStorage
     localStorage.removeItem('ramyeon_cart')
     
-    console.log('🗑️ Cart cleared (including localStorage)')
   }
   
   /**
@@ -723,13 +665,6 @@ export function useOnlineOrder() {
       // Calculate total
       cartTotal.value = cartSubtotal.value + cartTax.value + cartShipping.value - cartDiscount.value
       
-      console.log('💰 Cart totals calculated:', {
-        subtotal: cartSubtotal.value,
-        tax: cartTax.value,
-        shipping: cartShipping.value,
-        discount: cartDiscount.value,
-        total: cartTotal.value
-      })
     } catch (err) {
       console.error('❌ Calculate cart totals error:', err)
     }
@@ -752,9 +687,7 @@ export function useOnlineOrder() {
       if (Array.isArray(parsedCart)) {
         cartItems.value = parsedCart
         await calculateCartTotals()
-        console.log('🛒 Cart restored from localStorage:', parsedCart.length, 'items')
       } else {
-        console.warn('⚠️ Invalid cart data found in localStorage, clearing')
         localStorage.removeItem('ramyeon_cart')
         cartItems.value = []
       }
@@ -777,8 +710,6 @@ export function useOnlineOrder() {
    */
   const calculatePromotionDiscount = (promotion, cartItems) => {
     try {
-      console.log('🧮 Calculating promotion discount:', promotion.name)
-      console.log('🧮 Cart items for discount calculation:', cartItems)
       
       // For drinks promotion (10% off)
       if (promotion.name && promotion.name.toLowerCase().includes('drink')) {
@@ -812,7 +743,6 @@ export function useOnlineOrder() {
                  itemName.includes('milk')
         })
         
-        console.log('🧮 Filtered drinks items:', drinksItems)
         
         if (drinksItems.length > 0) {
           // Calculate 10% discount on drinks
@@ -820,19 +750,15 @@ export function useOnlineOrder() {
             const itemPrice = item.price || item.selling_price || 0
             const itemQty = item.quantity || 1
             const itemTotal = itemPrice * itemQty
-            console.log(`🧮 Item: ${item.name}, Price: ${itemPrice}, Qty: ${itemQty}, Total: ${itemTotal}`)
             return total + itemTotal
           }, 0)
           
           const discount = drinksSubtotal * 0.1 // 10% discount
-          console.log('🧮 Drinks subtotal:', drinksSubtotal)
-          console.log('🧮 Drinks discount calculated:', discount)
           return Math.round(discount * 100) / 100 // Round to 2 decimal places
         }
       }
       
       // For other promotions, you can add more logic here
-      console.log('🧮 No applicable discount found')
       return 0
     } catch (error) {
       console.error('❌ Error calculating promotion discount:', error)
@@ -847,21 +773,10 @@ export function useOnlineOrder() {
    */
   const applyPromotionToCart = async (promotionCodeOrObject) => {
     try {
-      console.log('🎯 Applying promotion to cart:', promotionCodeOrObject)
       
       let promotionObject
       
       // Check if we have a promotion object or just a code
-      console.log('🔍 Debug promotion object:', {
-        hasObject: !!promotionCodeOrObject,
-        hasId: !!promotionCodeOrObject?.id,
-        hasName: !!promotionCodeOrObject?.name,
-        id: promotionCodeOrObject?.id,
-        name: promotionCodeOrObject?.name,
-        type: typeof promotionCodeOrObject,
-        allFields: Object.keys(promotionCodeOrObject || {}),
-        fullObject: promotionCodeOrObject
-      })
       
       // Check for different ID field names (id, _id, promotion_id)
       let promotionId = promotionCodeOrObject?.id || promotionCodeOrObject?._id || promotionCodeOrObject?.promotion_id
@@ -869,7 +784,6 @@ export function useOnlineOrder() {
       if (promotionCodeOrObject && promotionId && promotionCodeOrObject.name) {
         // We have a promotion object, use it directly
         promotionObject = promotionCodeOrObject
-        console.log('🎯 Using promotion object directly:', promotionObject.name, 'ID:', promotionId)
       } else {
         // We have a code, validate it first
         const validation = await validatePromotion(promotionCodeOrObject, {
@@ -904,7 +818,6 @@ export function useOnlineOrder() {
         // Recalculate totals
         await calculateCartTotals()
         
-        console.log('✅ Promotion applied to cart locally')
         return { 
           success: true, 
           data: { 
@@ -928,7 +841,6 @@ export function useOnlineOrder() {
    */
   const removePromotionFromCart = async (promotionId) => {
     try {
-      console.log('🗑️ Removing promotion from cart:', promotionId)
       
       const result = await removePromotion(promotionId)
       
@@ -942,7 +854,6 @@ export function useOnlineOrder() {
         // Recalculate totals
         await calculateCartTotals()
         
-        console.log('✅ Promotion removed from cart')
         return { success: true, data: result.data }
       } else {
         throw new Error('Promotion removal failed: ' + result.error)
@@ -965,7 +876,6 @@ export function useOnlineOrder() {
    */
   const applyLoyaltyPoints = async (points, userId) => {
     try {
-      console.log('💎 Applying loyalty points to cart:', points)
       
       // Validate points redemption
       const validation = await validatePointsRedemption(points, userId, {
@@ -987,7 +897,6 @@ export function useOnlineOrder() {
         // Recalculate totals
         await calculateCartTotals()
         
-        console.log('✅ Loyalty points applied to cart')
         return { success: true, data: discountResult.data }
       } else {
         throw new Error('Points discount calculation failed: ' + discountResult.error)
@@ -1018,13 +927,9 @@ export function useOnlineOrder() {
       
       // Recalculate totals
       calculateCartTotals()
-      
-      console.log('✅ Loyalty points removed from cart')
-    } else {
-      console.log('ℹ️ No loyalty points promotion to remove')
     }
   }
-  
+
   // ================================================================
   // UTILITY METHODS
   // ================================================================
@@ -1053,7 +958,6 @@ export function useOnlineOrder() {
    * Refresh orders data
    */
   const refreshOrders = async (userId) => {
-    console.log('🔄 Refreshing orders data')
     ordersCache.value.clear()
     orderHistoryCache.value = null
     lastFetchTime.value = null
@@ -1064,7 +968,6 @@ export function useOnlineOrder() {
    * Clear all cache
    */
   const clearCache = () => {
-    console.log('🗑️ Clearing orders cache')
     ordersCache.value.clear()
     orderHistoryCache.value = null
     lastFetchTime.value = null

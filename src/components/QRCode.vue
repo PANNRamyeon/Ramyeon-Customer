@@ -1,46 +1,33 @@
 <template>
   <div class="qr-code-container">
-    <div class="qr-code-wrapper" :class="{ 'large': size === 'large', 'small': size === 'small' }">
-      <div class="qr-code-header" v-if="title">
+    <div class="qr-code-wrapper" :class="size">
+      <div v-if="title" class="qr-code-header">
         <h3>{{ title }}</h3>
         <p v-if="subtitle">{{ subtitle }}</p>
       </div>
-      
+
       <div class="qr-code-display">
-        <div class="qr-pattern">
-          <!-- QR Code Pattern Simulation -->
-          <div class="qr-grid">
-            <div v-for="(row, rowIndex) in qrPattern" :key="rowIndex" class="qr-row">
-              <div 
-                v-for="(cell, cellIndex) in row" 
-                :key="cellIndex" 
-                :class="['qr-cell', { 'filled': cell }]"
-              ></div>
-            </div>
-          </div>
-          
-          <!-- Corner markers -->
-          <div class="corner-marker top-left"></div>
-          <div class="corner-marker top-right"></div>
-          <div class="corner-marker bottom-left"></div>
-        </div>
+        <div v-if="loading" class="qr-placeholder">Generating…</div>
+        <div v-else-if="error" class="qr-placeholder qr-error">Failed to generate QR</div>
+        <img
+          v-else
+          :src="dataUrl"
+          alt="Customer QR Code"
+          class="qr-image"
+        />
       </div>
-      
-      <div class="qr-code-info" v-if="showCode">
+
+      <div v-if="showCode" class="qr-code-info">
         <div class="code-display">
           <span class="code-label">Code:</span>
-          <span class="code-value">{{ code }}</span>
-          <button 
-            class="copy-btn" 
-            @click="copyCode"
-            :class="{ 'copied': isCopied }"
-          >
+          <span class="code-value">{{ shortCode }}</span>
+          <button class="copy-btn" @click="copyCode" :class="{ copied: isCopied }">
             {{ isCopied ? '✓' : '📋' }}
           </button>
         </div>
       </div>
-      
-      <div class="qr-instructions" v-if="instructions">
+
+      <div v-if="instructions" class="qr-instructions">
         <p>{{ instructions }}</p>
       </div>
     </div>
@@ -48,131 +35,77 @@
 </template>
 
 <script>
+import QRCode from 'qrcode'
+
 export default {
   name: 'QRCode',
   props: {
-    code: {
-      type: String,
-      required: true
-    },
-    title: {
-      type: String,
-      default: ''
-    },
-    subtitle: {
-      type: String,
-      default: ''
-    },
+    code: { type: String, required: true },
+    title: { type: String, default: '' },
+    subtitle: { type: String, default: '' },
     size: {
       type: String,
-      default: 'medium', // small, medium, large
-      validator: value => ['small', 'medium', 'large'].includes(value)
+      default: 'medium',
+      validator: v => ['small', 'medium', 'large'].includes(v)
     },
-    showCode: {
-      type: Boolean,
-      default: true
-    },
-    instructions: {
-      type: String,
-      default: ''
-    },
-    theme: {
-      type: String,
-      default: 'light', // light, dark
-      validator: value => ['light', 'dark'].includes(value)
-    }
+    showCode: { type: Boolean, default: true },
+    instructions: { type: String, default: '' },
   },
   data() {
     return {
+      dataUrl: '',
+      loading: true,
+      error: false,
       isCopied: false,
-      qrPattern: []
     }
   },
-  mounted() {
-    this.generateQRPattern();
+  computed: {
+    shortCode() {
+      return this.code.length > 20 ? `${this.code.slice(0, 8)}…${this.code.slice(-4)}` : this.code
+    },
+    qrSize() {
+      return this.size === 'large' ? 240 : this.size === 'small' ? 140 : 190
+    },
   },
   watch: {
-    code() {
-      this.generateQRPattern();
-    }
+    code() { this.renderQR() },
+  },
+  mounted() {
+    this.renderQR()
   },
   methods: {
-    generateQRPattern() {
-      // Generate a pseudo-random QR code pattern based on the code
-      const size = 21; // Standard QR code size
-      const pattern = [];
-      
-      // Create a seed from the code
-      let seed = 0;
-      for (let i = 0; i < this.code.length; i++) {
-        seed += this.code.charCodeAt(i);
+    async renderQR() {
+      if (!this.code) return
+      this.loading = true
+      this.error = false
+      try {
+        this.dataUrl = await QRCode.toDataURL(this.code, {
+          width: this.qrSize,
+          margin: 2,
+          color: { dark: '#1a1a1a', light: '#ffffff' },
+          errorCorrectionLevel: 'M',
+        })
+      } catch {
+        this.error = true
+      } finally {
+        this.loading = false
       }
-      
-      // Simple pseudo-random number generator
-      const random = (seed) => {
-        const x = Math.sin(seed) * 10000;
-        return x - Math.floor(x);
-      };
-      
-      for (let row = 0; row < size; row++) {
-        const rowPattern = [];
-        for (let col = 0; col < size; col++) {
-          // Skip corner markers and timing patterns
-          if (this.isCornerMarker(row, col, size) || this.isTimingPattern(row, col)) {
-            rowPattern.push(false);
-          } else {
-            // Generate pseudo-random pattern
-            const cellSeed = seed + row * size + col;
-            rowPattern.push(random(cellSeed) > 0.5);
-          }
-        }
-        pattern.push(rowPattern);
-      }
-      
-      this.qrPattern = pattern;
     },
-    
-    isCornerMarker(row, col, size) {
-      // Top-left corner
-      if (row < 7 && col < 7) return true;
-      // Top-right corner
-      if (row < 7 && col >= size - 7) return true;
-      // Bottom-left corner
-      if (row >= size - 7 && col < 7) return true;
-      return false;
-    },
-    
-    isTimingPattern(row, col) {
-      // Horizontal timing pattern
-      if (row === 6) return true;
-      // Vertical timing pattern
-      if (col === 6) return true;
-      return false;
-    },
-    
     async copyCode() {
       try {
-        await navigator.clipboard.writeText(this.code);
-        this.isCopied = true;
-        setTimeout(() => {
-          this.isCopied = false;
-        }, 2000);
-      } catch (err) {
-        // Fallback for older browsers
-        const textArea = document.createElement('textarea');
-        textArea.value = this.code;
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-        
-        this.isCopied = true;
-        setTimeout(() => {
-          this.isCopied = false;
-        }, 2000);
+        await navigator.clipboard.writeText(this.code)
+      } catch {
+        const el = document.createElement('textarea')
+        el.value = this.code
+        document.body.appendChild(el)
+        el.select()
+        document.execCommand('copy')
+        document.body.removeChild(el)
       }
-    }
-  }
+      this.isCopied = true
+      setTimeout(() => { this.isCopied = false }, 2000)
+    },
+  },
 }
 </script>
 
@@ -187,136 +120,75 @@ export default {
 .qr-code-wrapper {
   background: white;
   border-radius: 20px;
-  padding: 30px;
+  padding: 28px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
   text-align: center;
-  max-width: 300px;
   width: 100%;
+  max-width: 280px;
   border: 3px solid #f0f0f0;
-  transition: all 0.3s ease;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
 
 .qr-code-wrapper:hover {
-  transform: translateY(-5px);
+  transform: translateY(-4px);
   box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
 }
 
-.qr-code-wrapper.large {
-  max-width: 400px;
-  padding: 40px;
-}
-
-.qr-code-wrapper.small {
-  max-width: 200px;
-  padding: 20px;
-}
+.qr-code-wrapper.large { max-width: 360px; padding: 36px; }
+.qr-code-wrapper.small { max-width: 200px; padding: 18px; }
 
 .qr-code-header h3 {
-  font-size: 1.4rem;
+  font-size: 1.3rem;
   font-weight: 700;
-  color: #333;
-  margin: 0 0 8px 0;
-  background: linear-gradient(135deg, #ff4757, #ff3742);
+  margin: 0 0 6px;
+  background: linear-gradient(135deg, #b33a3a, #8a2a2a);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 .qr-code-header p {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   color: #666;
-  margin: 0 0 20px 0;
+  margin: 0 0 18px;
 }
 
 .qr-code-display {
-  position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
-  margin: 20px 0;
+  margin: 16px 0;
 }
 
-.qr-pattern {
-  position: relative;
-  background: white;
-  border: 2px solid #e1e1e1;
-  border-radius: 12px;
-  padding: 15px;
-  display: inline-block;
-}
-
-.qr-grid {
-  display: grid;
-  grid-template-columns: repeat(21, 1fr);
-  gap: 1px;
-  width: 168px;
-  height: 168px;
-}
-
-.qr-code-wrapper.large .qr-grid {
-  width: 210px;
-  height: 210px;
-}
-
-.qr-code-wrapper.small .qr-grid {
-  width: 126px;
-  height: 126px;
-}
-
-.qr-row {
-  display: contents;
-}
-
-.qr-cell {
+.qr-image {
+  border-radius: 10px;
+  border: 2px solid #e8e8e8;
+  display: block;
   width: 100%;
-  height: 100%;
-  background: white;
-  transition: all 0.1s ease;
+  max-width: 190px;
 }
 
-.qr-cell.filled {
-  background: #333;
+.qr-code-wrapper.large .qr-image { max-width: 240px; }
+.qr-code-wrapper.small .qr-image { max-width: 140px; }
+
+.qr-placeholder {
+  width: 190px;
+  height: 190px;
+  border-radius: 10px;
+  border: 2px solid #e8e8e8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #aaa;
+  font-size: 0.9rem;
+  background: #f8f8f8;
 }
 
-/* Corner markers */
-.corner-marker {
-  position: absolute;
-  width: 42px;
-  height: 42px;
-  border: 3px solid #333;
-  background: white;
-}
-
-.corner-marker::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 18px;
-  height: 18px;
-  background: #333;
-  border-radius: 2px;
-}
-
-.corner-marker.top-left {
-  top: 15px;
-  left: 15px;
-}
-
-.corner-marker.top-right {
-  top: 15px;
-  right: 15px;
-}
-
-.corner-marker.bottom-left {
-  bottom: 15px;
-  left: 15px;
-}
+.qr-error { color: #b33a3a; }
 
 .qr-code-info {
-  margin-top: 20px;
-  padding: 15px;
+  margin-top: 18px;
+  padding: 12px;
   background: #f8f9fa;
   border-radius: 10px;
   border: 1px solid #e9ecef;
@@ -326,183 +198,57 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .code-label {
   font-weight: 600;
   color: #666;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
 .code-value {
   font-family: 'Courier New', monospace;
   font-weight: 700;
   color: #333;
-  font-size: 1.1rem;
+  font-size: 0.95rem;
   background: white;
-  padding: 8px 12px;
+  padding: 5px 10px;
   border-radius: 6px;
   border: 1px solid #ddd;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
 }
 
 .copy-btn {
-  background: #ff4757;
+  background: #b33a3a;
   color: white;
   border: none;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 1rem;
-  transition: all 0.3s ease;
-  min-width: 40px;
+  font-size: 0.95rem;
+  transition: all 0.25s ease;
+  min-width: 36px;
 }
 
-.copy-btn:hover {
-  background: #ff3742;
-  transform: scale(1.05);
-}
-
-.copy-btn.copied {
-  background: #00b894;
-  transform: scale(1.1);
-}
+.copy-btn:hover { background: #8a2a2a; }
+.copy-btn.copied { background: #00b894; }
 
 .qr-instructions {
-  margin-top: 15px;
-  padding: 12px;
-  background: linear-gradient(135deg, #ff4757, #ff3742);
+  margin-top: 14px;
+  padding: 11px 14px;
+  background: linear-gradient(135deg, #b33a3a, #8a2a2a);
   color: white;
   border-radius: 8px;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   line-height: 1.4;
 }
 
-.qr-instructions p {
-  margin: 0;
-  font-weight: 500;
-}
+.qr-instructions p { margin: 0; font-weight: 500; }
 
-/* Dark theme support */
-.dark-mode .qr-code-wrapper {
-  background: #2d2d2d;
-  border-color: #4a4a4a;
-}
-
-.dark-mode .qr-code-header h3 {
-  color: #f5f5f5;
-}
-
-.dark-mode .qr-code-header p {
-  color: #b8b8b8;
-}
-
-.dark-mode .qr-pattern {
-  background: #3a3a3a;
-  border-color: #4a4a4a;
-}
-
-.dark-mode .qr-cell {
-  background: #3a3a3a;
-}
-
-.dark-mode .qr-cell.filled {
-  background: #f5f5f5;
-}
-
-.dark-mode .corner-marker {
-  border-color: #f5f5f5;
-  background: #3a3a3a;
-}
-
-.dark-mode .corner-marker::after {
-  background: #f5f5f5;
-}
-
-.dark-mode .qr-code-info {
-  background: #3a3a3a;
-  border-color: #4a4a4a;
-}
-
-.dark-mode .code-label {
-  color: #b8b8b8;
-}
-
-.dark-mode .code-value {
-  background: #4a4a4a;
-  color: #f5f5f5;
-  border-color: #5a5a5a;
-}
-
-/* Responsive design */
 @media (max-width: 480px) {
-  .qr-code-container {
-    padding: 15px;
-  }
-  
-  .qr-code-wrapper {
-    padding: 20px;
-    max-width: 280px;
-  }
-  
-  .qr-grid {
-    width: 140px;
-    height: 140px;
-  }
-  
-  .corner-marker {
-    width: 35px;
-    height: 35px;
-  }
-  
-  .corner-marker::after {
-    width: 15px;
-    height: 15px;
-  }
-  
-  .code-display {
-    flex-direction: column;
-    gap: 8px;
-  }
-  
-  .code-value {
-    font-size: 1rem;
-    padding: 6px 10px;
-  }
-}
-
-/* Animation for QR code generation */
-@keyframes qrGenerate {
-  0% {
-    opacity: 0;
-    transform: scale(0.8);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.qr-pattern {
-  animation: qrGenerate 0.5s ease-out;
-}
-
-/* Pulse animation for copy success */
-@keyframes pulse {
-  0% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.1);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-
-.copy-btn.copied {
-  animation: pulse 0.3s ease-in-out;
+  .qr-code-wrapper { padding: 18px; }
+  .qr-image, .qr-placeholder { max-width: 160px; }
 }
 </style>
