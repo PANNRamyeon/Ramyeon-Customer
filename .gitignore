@@ -179,3 +179,4 @@ Thumbs.db
 *.tmp
 *.env.*
 !*.env.example
+report.md
