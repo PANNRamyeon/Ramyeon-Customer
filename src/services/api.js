@@ -110,13 +110,13 @@ apiClient.interceptors.response.use(
 
 // ============================================================================
 // AUTH API
-// Registration ENABLED | getProfile → /auth/customer/profile/
+// Registration ENABLED | getProfile → /web/auth/profile/
 // ============================================================================
 export const authAPI = {
   // Registration (enabled)
   register: async (payload) => {
     try {
-      const res = await apiClient.post('/auth/customer/register/', payload);
+      const res = await apiClient.post('/web/auth/register/', payload);
 
       const { access_token, refresh_token } = res.data || {};
 
@@ -133,7 +133,7 @@ export const authAPI = {
   // Login
   login: async (email, password) => {
     try {
-      const response = await apiClient.post('/auth/customer/login/', { email, password });
+      const response = await apiClient.post('/web/auth/login/', { email, password });
 
       const { access_token, refresh_token } = response.data || {};
       if (access_token) localStorage.setItem('access_token', access_token);
@@ -171,7 +171,7 @@ export const authAPI = {
   // Profile (kept version)
   getProfile: async () => {
     try {
-      const res = await apiClient.get('/auth/customer/profile/');
+      const res = await apiClient.get('/web/auth/profile/');
       return res.data;
     } catch (error) {
       console.error('[API] getProfile error:', error.response?.data);
