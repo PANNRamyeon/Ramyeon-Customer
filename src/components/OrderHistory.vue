@@ -20,77 +20,114 @@
     </div>
 
     <!-- Orders List -->
-    <div v-else-if="orders.length > 0" class="orders-list">
-      <div v-for="order in sortedOrders" :key="order.id" class="order-card">
+    <div v-else-if="orders.length > 0">
+      <!-- Filter Tabs -->
+      <div class="filter-tabs">
+        <button
+          v-for="tab in statusFilters"
+          :key="tab.key"
+          class="filter-tab"
+          :class="{ active: filterStatus === tab.key }"
+          @click="filterStatus = tab.key"
+        >
+          {{ tab.label }}
+          <span class="tab-count">{{ getCountForStatus(tab.key) }}</span>
+        </button>
+      </div>
 
-        <!-- Card Header -->
-        <div class="order-card-header">
-          <div class="order-card-title">
-            <span class="order-id">{{ order.displayId }}</span>
-            <span class="order-date">{{ formatDate(order.orderTime) }}</span>
-          </div>
-          <span class="status-badge" :class="'status-' + order.status">
-            {{ formatStatus(order.status) }}
-          </span>
-        </div>
+      <div class="orders-list" v-if="filteredOrders.length > 0">
+        <div v-for="order in sortedOrders" :key="order.id" class="order-card">
 
-        <!-- Items -->
-        <div class="order-items">
-          <div v-for="(item, i) in order.items" :key="i" class="order-item">
-            <div class="item-left">
-              <img
-                :src="getItemImage(item)"
-                :alt="item.name"
-                class="item-image"
-                @error="handleImageError"
-              />
-              <div>
-                <p class="item-name">{{ item.name }}</p>
-                <p class="item-qty">x{{ item.quantity }}</p>
-              </div>
+          <!-- Card Header -->
+          <div class="order-card-header">
+            <div class="order-card-title">
+              <span class="order-id">{{ order.displayId }}</span>
+              <span class="order-date">{{ formatDate(order.orderTime) }}</span>
             </div>
-            <p class="item-price">₱{{ (item.price * item.quantity).toFixed(2) }}</p>
+            <span class="status-badge" :class="'status-' + order.status">
+              {{ formatStatus(order.status) }}
+            </span>
           </div>
-        </div>
 
-        <!-- Totals -->
-        <div class="order-totals">
-          <div class="total-row">
-            <span>Subtotal</span>
-            <span>₱{{ order.subtotal.toFixed(2) }}</span>
+          <!-- Items -->
+          <div class="order-items">
+            <div v-for="(item, i) in order.items" :key="i" class="order-item">
+              <div class="item-left">
+                <img
+                  :src="getItemImage(item)"
+                  :alt="item.name"
+                  class="item-image"
+                  @error="handleImageError"
+                />
+                <div>
+                  <p class="item-name">{{ item.name }}</p>
+                  <p class="item-qty">x{{ item.quantity }}</p>
+                </div>
+              </div>
+              <p class="item-price">₱{{ (item.price * item.quantity).toFixed(2) }}</p>
+            </div>
           </div>
-          <div class="total-row">
-            <span>Delivery Fee</span>
-            <span>₱{{ order.deliveryFee.toFixed(2) }}</span>
-          </div>
-          <div class="total-row">
-            <span>Service Fee</span>
-            <span>₱{{ order.serviceFee.toFixed(2) }}</span>
-          </div>
-          <div class="total-row grand-total">
-            <span>Total</span>
-            <span>₱{{ order.total.toFixed(2) }}</span>
-          </div>
-        </div>
 
-        <!-- Actions -->
-        <div class="order-actions">
-          <button class="btn-details" @click="openModal(order)">View Details</button>
-          <button
-            v-if="isCancellable(order)"
-            class="btn-cancel"
-            :disabled="cancellingId === order.id"
-            @click="cancelOrder(order)"
-          >
-            {{ cancellingId === order.id ? 'Cancelling...' : 'Cancel' }}
-          </button>
-          <button v-else class="btn-reorder" @click="reorder(order)">Order Again</button>
-        </div>
+          <!-- Totals -->
+          <div class="order-totals">
+            <div class="total-row">
+              <span>Subtotal</span>
+              <span>₱{{ order.subtotal.toFixed(2) }}</span>
+            </div>
+            <div class="total-row">
+              <span>Delivery Fee</span>
+              <span>₱{{ order.deliveryFee.toFixed(2) }}</span>
+            </div>
+            <div class="total-row">
+              <span>Service Fee</span>
+              <span>₱{{ order.serviceFee.toFixed(2) }}</span>
+            </div>
+            <div class="total-row grand-total">
+              <span>Total</span>
+              <span>₱{{ order.total.toFixed(2) }}</span>
+            </div>
+          </div>
 
+          <!-- Actions -->
+          <div class="order-actions">
+            <button class="btn-details" @click="openModal(order)">View Details</button>
+            <button
+              v-if="isCancellable(order)"
+              class="btn-cancel"
+              :disabled="cancellingId === order.id"
+              @click="cancelOrder(order)"
+            >
+              {{ cancellingId === order.id ? 'Cancelling...' : 'Cancel' }}
+            </button>
+            <button v-else class="btn-reorder" @click="reorder(order)">Order Again</button>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Empty state for filtered view -->
+      <div v-else class="empty-state">
+        <div class="empty-icon">📭</div>
+        <h2>No {{ filterStatus === 'all' ? 'orders' : filterStatus + ' orders' }} yet</h2>
+        <p>
+          <template v-if="filterStatus === 'active'">
+            You have no ongoing orders at the moment.
+          </template>
+          <template v-else-if="filterStatus === 'completed'">
+            No completed orders found.
+          </template>
+          <template v-else-if="filterStatus === 'cancelled'">
+            You have no cancelled orders.
+          </template>
+          <template v-else>
+            Start ordering your favorite ramyeon!
+          </template>
+        </p>
+        <button class="browse-btn" @click="$emit('setCurrentPage', 'Menu')">Browse Menu</button>
       </div>
     </div>
 
-    <!-- Empty -->
+    <!-- Empty (no orders at all) -->
     <div v-else class="empty-state">
       <div class="empty-icon">📦</div>
       <h2>No Orders Yet</h2>
@@ -180,6 +217,11 @@
 import { ordersAPI } from '../services/api.js';
 import OrderStatusTracker from './OrderStatusTracker.vue';
 
+// Active statuses match the backend definition
+const ACTIVE_STATUSES = new Set([
+  'pending', 'confirmed', 'processing', 'preparing', 'on_the_way'
+]);
+
 export default {
   name: 'OrderHistory',
   components: { OrderStatusTracker },
@@ -192,12 +234,30 @@ export default {
       selectedOrder: null,
       error: null,
       cancellingId: null,
+      filterStatus: 'all',                       // current filter
+      statusFilters: [
+        { key: 'all', label: 'All' },
+        { key: 'active', label: 'Active' },
+        { key: 'completed', label: 'Completed' },
+        { key: 'cancelled', label: 'Cancelled' }
+      ]
     };
   },
 
   computed: {
+    // Filter orders based on selected status
+    filteredOrders() {
+      if (this.filterStatus === 'all') return this.orders;
+
+      if (this.filterStatus === 'active') {
+        return this.orders.filter(o => ACTIVE_STATUSES.has(o.status));
+      }
+      // For 'completed' and 'cancelled' we match the order's status
+      return this.orders.filter(o => o.status === this.filterStatus);
+    },
+
     sortedOrders() {
-      return [...this.orders].sort(
+      return [...this.filteredOrders].sort(
         (a, b) => new Date(b.orderTime || 0) - new Date(a.orderTime || 0)
       );
     }
@@ -208,33 +268,27 @@ export default {
   },
 
   methods: {
+    // Count orders for each tab badge
+    getCountForStatus(key) {
+      if (key === 'all') return this.orders.length;
+      if (key === 'active') return this.orders.filter(o => ACTIVE_STATUSES.has(o.status)).length;
+      return this.orders.filter(o => o.status === key).length;
+    },
+
     async loadOrders() {
       this.loading = true;
       this.error = null;
 
       const session = JSON.parse(localStorage.getItem('ramyeon_user_session') || '{}');
-      console.log('[OrderHistory] session from localStorage:', session);
-      console.log('[OrderHistory] customerId used for fetch:', session.id);
-      console.log('[OrderHistory] access_token present?', !!localStorage.getItem('access_token'));
+      console.log('[OrderHistory] customerId:', session.id);
 
       try {
-        const result = await ordersAPI.getAll();
-        console.log('[OrderHistory] getAll result:', result);
-        console.log('[OrderHistory] result.success:', result.success);
-        console.log('[OrderHistory] result.results is array?', Array.isArray(result.results));
-        console.log('[OrderHistory] result.results type:', typeof result.results);
-        console.log('[OrderHistory] result.results value:', result.results);
-
+        // Fetch all orders (no filter), then filter locally
+        const result = await ordersAPI.getAll(session.id);
         if (result.success && Array.isArray(result.results)) {
           this.orders = result.results.map(o => this.mapOrder(o));
-          console.log('[OrderHistory] mapped orders count:', this.orders.length);
-          if (this.orders.length > 0) {
-            console.log('[OrderHistory] first mapped order:', this.orders[0]);
-          }
         } else {
           this.error = result.error || 'Failed to load orders';
-          console.warn('[OrderHistory] not loading orders — success:', result.success, '| isArray:', Array.isArray(result.results));
-          console.warn('[OrderHistory] error set to:', this.error);
         }
       } catch (err) {
         this.error = 'Unable to load orders. Please try again.';
@@ -244,8 +298,10 @@ export default {
       }
     },
 
+    // The rest of your existing methods (mapOrder, openModal, etc.) remain unchanged.
+    // I'm including them for completeness, but you can keep your originals.
+
     mapOrder(o) {
-      // DynamoDB to_dict() returns a nested structure — see models/Online_Transactions.py
       const deliveryAddr = o.delivery?.address;
       const addressStr = typeof deliveryAddr === 'object' && deliveryAddr
         ? [deliveryAddr.street, deliveryAddr.barangay, deliveryAddr.city, deliveryAddr.postal_code]
@@ -284,13 +340,8 @@ export default {
       };
     },
 
-    openModal(order) {
-      this.selectedOrder = order;
-    },
-
-    closeModal() {
-      this.selectedOrder = null;
-    },
+    openModal(order) { this.selectedOrder = order; },
+    closeModal() { this.selectedOrder = null; },
 
     handleStatusUpdate(data) {
       const idx = this.orders.findIndex(o => o.id === data.orderId);
@@ -310,13 +361,8 @@ export default {
       this.$emit('setCurrentPage', 'Cart');
     },
 
-    getItemImage(item) {
-      return item.image || item.imageUrl || '';
-    },
-
-    handleImageError(e) {
-      e.target.style.display = 'none';
-    },
+    getItemImage(item) { return item.image || item.imageUrl || ''; },
+    handleImageError(e) { e.target.style.display = 'none'; },
 
     formatDate(dateStr) {
       if (!dateStr) return '—';
@@ -338,34 +384,21 @@ export default {
       return map[s] || s;
     },
 
-    formatDeliveryType(t) {
-      return t === 'delivery' ? 'Delivery' : 'Pick-up';
-    },
-
+    formatDeliveryType(t) { return t === 'delivery' ? 'Delivery' : 'Pick-up'; },
     formatPaymentMethod(m) {
-      const map = {
-        cash: 'Cash on Delivery', gcash: 'GCash',
-        card: 'Credit / Debit Card', grabpay: 'GrabPay', cod: 'Cash on Delivery'
-      };
+      const map = { cash: 'Cash on Delivery', gcash: 'GCash', card: 'Credit / Debit Card', grabpay: 'GrabPay', cod: 'Cash on Delivery' };
       return map[m] || m;
     },
-
     formatPaymentStatus(s) {
-      const map = {
-        pending: 'Pending', paid: 'Paid', succeeded: 'Paid',
-        failed: 'Failed', refunded: 'Refunded', cancelled: 'Cancelled'
-      };
+      const map = { pending: 'Pending', paid: 'Paid', succeeded: 'Paid', failed: 'Failed', refunded: 'Refunded', cancelled: 'Cancelled' };
       return map[s] || s;
     },
 
-    isCancellable(order) {
-      return ['pending', 'confirmed'].includes(order.status);
-    },
+    isCancellable(order) { return ['pending', 'confirmed'].includes(order.status); },
 
     async cancelOrder(order) {
       const reason = prompt('Reason for cancellation (required):');
       if (!reason || !reason.trim()) return;
-
       this.cancellingId = order.id;
       try {
         const result = await ordersAPI.cancel(order.id, reason.trim());
@@ -406,23 +439,53 @@ export default {
   color: #fff;
   box-shadow: 0 4px 20px rgba(255, 71, 87, 0.28);
 }
-.order-history-header h1 {
-  margin: 0;
-  font-size: 1.9rem;
-  font-weight: 700;
+.order-history-header h1 { margin: 0; font-size: 1.9rem; font-weight: 700; }
+.order-history-header p { margin: 6px 0 0; opacity: 0.85; font-size: 0.9rem; }
+
+/* ── Filter Tabs ────────────────────────────────────────── */
+.filter-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
 }
-.order-history-header p {
-  margin: 6px 0 0;
-  opacity: 0.85;
+.filter-tab {
+  background: #f5f5f5;
+  border: none;
+  padding: 8px 18px;
+  border-radius: 24px;
   font-size: 0.9rem;
+  font-weight: 600;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: 'Poppins', sans-serif;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.filter-tab:hover {
+  background: #ffebee;
+  color: #ff4757;
+}
+.filter-tab.active {
+  background: #ff4757;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(255,71,87,0.3);
+}
+.tab-count {
+  background: rgba(255,255,255,0.3);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.filter-tab.active .tab-count {
+  background: rgba(255,255,255,0.25);
 }
 
-/* ── Loading ────────────────────────────────────────────── */
-.loading-state {
-  text-align: center;
-  padding: 60px 20px;
-  color: #666;
-}
+/* ── Loading / Error / Empty states (unchanged) ─────────── */
+.loading-state { text-align: center; padding: 60px 20px; color: #666; }
 .loading-spinner {
   width: 42px; height: 42px;
   border: 3px solid #f0f0f0;
@@ -432,45 +495,34 @@ export default {
   margin: 0 auto 16px;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+.error-state { text-align: center; padding: 70px 20px; background: #fff5f5; border-radius: 18px; border: 1.5px solid #fecaca; }
+.error-icon { font-size: 3rem; margin-bottom: 16px; }
+.error-state h2 { margin: 0 0 8px; color: #dc2626; }
+.error-state p  { margin: 0 0 28px; color: #888; font-size: 0.9rem; }
+.empty-state { text-align: center; padding: 70px 20px; background: #fff; border-radius: 18px; border: 1.5px solid #f0f0f0; }
+.empty-icon { font-size: 4rem; margin-bottom: 16px; }
+.empty-state h2 { margin: 0 0 8px; color: #1a1a1a; }
+.empty-state p  { margin: 0 0 28px; color: #888; }
+.browse-btn {
+  padding: 12px 36px; background: #ff4757; color: #fff; border: none;
+  border-radius: 24px; font-size: 0.95rem; font-weight: 600; cursor: pointer;
+  font-family: 'Poppins', sans-serif; transition: all 0.2s;
+}
+.browse-btn:hover { background: #ff3742; box-shadow: 0 4px 16px rgba(255,71,87,0.35); transform: translateY(-1px); }
 
-/* ── Orders List ────────────────────────────────────────── */
+/* ── Orders List / Card (unchanged) ───────────────────── */
 .orders-list { display: flex; flex-direction: column; gap: 16px; }
-
-/* ── Order Card ─────────────────────────────────────────── */
 .order-card {
-  background: #fff;
-  border: 1.5px solid #f0f0f0;
-  border-radius: 16px;
-  padding: 22px 24px;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  background: #fff; border: 1.5px solid #f0f0f0; border-radius: 16px;
+  padding: 22px 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.06);
   transition: box-shadow 0.2s, transform 0.2s;
 }
-.order-card:hover {
-  box-shadow: 0 6px 24px rgba(0,0,0,0.1);
-  transform: translateY(-2px);
-}
-
-/* Card header */
-.order-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 16px;
-  padding-bottom: 14px;
-  border-bottom: 1.5px solid #f5f5f5;
-}
+.order-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.1); transform: translateY(-2px); }
+.order-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1.5px solid #f5f5f5; }
 .order-card-title { display: flex; flex-direction: column; gap: 3px; }
 .order-id { font-weight: 700; color: #1a1a1a; font-size: 1rem; }
 .order-date { font-size: 0.8rem; color: #999; }
-
-/* Status badges */
-.status-badge {
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  flex-shrink: 0;
-}
+.status-badge { padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; flex-shrink: 0; }
 .status-pending   { background: #fff4e0; color: #d97706; }
 .status-confirmed { background: #e8f4fd; color: #0369a1; }
 .status-processing,
@@ -483,232 +535,48 @@ export default {
 .status-delivered,
 .status-completed { background: #e6f9f0; color: #059669; }
 .status-cancelled { background: #fef2f2; color: #dc2626; }
-
-/* Items */
 .order-items { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
-.order-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 12px;
-  background: #fafafa;
-  border-radius: 10px;
-}
+.order-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #fafafa; border-radius: 10px; }
 .item-left { display: flex; align-items: center; gap: 12px; }
-.item-image {
-  width: 44px; height: 44px;
-  object-fit: cover; border-radius: 8px;
-  background: #eee;
-}
+.item-image { width: 44px; height: 44px; object-fit: cover; border-radius: 8px; background: #eee; }
 .item-name  { margin: 0; font-weight: 600; font-size: 0.9rem; color: #1a1a1a; }
 .item-qty   { margin: 0; font-size: 0.8rem; color: #999; }
 .item-price { margin: 0; font-weight: 700; color: #ff4757; font-size: 0.9rem; }
-
-/* Totals */
-.order-totals {
-  background: #fafafa;
-  border-radius: 10px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
-}
-.total-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.88rem;
-  color: #555;
-  padding: 4px 0;
-}
-.total-row.grand-total {
-  border-top: 1.5px solid #ebebeb;
-  margin-top: 8px;
-  padding-top: 10px;
-  font-weight: 700;
-  font-size: 1rem;
-  color: #1a1a1a;
-}
-
-/* Actions */
+.order-totals { background: #fafafa; border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; }
+.total-row { display: flex; justify-content: space-between; font-size: 0.88rem; color: #555; padding: 4px 0; }
+.total-row.grand-total { border-top: 1.5px solid #ebebeb; margin-top: 8px; padding-top: 10px; font-weight: 700; font-size: 1rem; color: #1a1a1a; }
 .order-actions { display: flex; gap: 10px; }
-.order-actions button {
-  flex: 1;
-  padding: 10px;
-  border: none;
-  border-radius: 10px;
-  font-weight: 600;
-  font-size: 0.85rem;
-  cursor: pointer;
-  font-family: 'Poppins', sans-serif;
-  transition: all 0.2s;
-}
-.btn-details {
-  background: transparent;
-  border: 1.5px solid #ff4757;
-  color: #ff4757;
-}
+.order-actions button { flex: 1; padding: 10px; border: none; border-radius: 10px; font-weight: 600; font-size: 0.85rem; cursor: pointer; font-family: 'Poppins', sans-serif; transition: all 0.2s; }
+.btn-details { background: transparent; border: 1.5px solid #ff4757; color: #ff4757; }
 .btn-details:hover { background: #ff4757; color: #fff; }
-.btn-reorder {
-  background: #ff4757;
-  color: #fff;
-}
-.btn-reorder:hover {
-  background: #ff3742;
-  box-shadow: 0 4px 12px rgba(255,71,87,0.35);
-  transform: translateY(-1px);
-}
-.btn-cancel {
-  background: transparent;
-  border: 1.5px solid #dc2626;
-  color: #dc2626;
-}
-.btn-cancel:hover:not(:disabled) {
-  background: #dc2626;
-  color: #fff;
-}
-.btn-cancel:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
+.btn-reorder { background: #ff4757; color: #fff; }
+.btn-reorder:hover { background: #ff3742; box-shadow: 0 4px 12px rgba(255,71,87,0.35); transform: translateY(-1px); }
+.btn-cancel { background: transparent; border: 1.5px solid #dc2626; color: #dc2626; }
+.btn-cancel:hover:not(:disabled) { background: #dc2626; color: #fff; }
+.btn-cancel:disabled { opacity: 0.55; cursor: not-allowed; }
 
-/* ── Error State ────────────────────────────────────────── */
-.error-state {
-  text-align: center;
-  padding: 70px 20px;
-  background: #fff5f5;
-  border-radius: 18px;
-  border: 1.5px solid #fecaca;
-}
-.error-icon { font-size: 3rem; margin-bottom: 16px; }
-.error-state h2 { margin: 0 0 8px; color: #dc2626; }
-.error-state p  { margin: 0 0 28px; color: #888; font-size: 0.9rem; }
-
-/* ── Empty State ────────────────────────────────────────── */
-.empty-state {
-  text-align: center;
-  padding: 70px 20px;
-  background: #fff;
-  border-radius: 18px;
-  border: 1.5px solid #f0f0f0;
-}
-.empty-icon { font-size: 4rem; margin-bottom: 16px; }
-.empty-state h2 { margin: 0 0 8px; color: #1a1a1a; }
-.empty-state p  { margin: 0 0 28px; color: #888; }
-.browse-btn {
-  padding: 12px 36px;
-  background: #ff4757;
-  color: #fff;
-  border: none;
-  border-radius: 24px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: 'Poppins', sans-serif;
-  transition: all 0.2s;
-}
-.browse-btn:hover {
-  background: #ff3742;
-  box-shadow: 0 4px 16px rgba(255,71,87,0.35);
-  transform: translateY(-1px);
-}
-
-/* ── Modal ──────────────────────────────────────────────── */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.55);
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  z-index: 900;
-  padding: 20px;
-  backdrop-filter: blur(3px);
-}
-@media (min-width: 600px) {
-  .modal-overlay { align-items: center; }
-}
-.modal {
-  background: #fff;
-  border-radius: 20px 20px 20px 20px;
-  width: 100%;
-  max-width: 600px;
-  max-height: 88vh;
-  overflow-y: auto;
-  box-shadow: 0 16px 60px rgba(0,0,0,0.25);
-  animation: modalUp 0.28s cubic-bezier(0.22,1,0.36,1);
-}
-@keyframes modalUp {
-  from { opacity: 0; transform: translateY(24px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 22px 24px 16px;
-  border-bottom: 1.5px solid #f0f0f0;
-  position: sticky;
-  top: 0;
-  background: #fff;
-  z-index: 1;
-}
+/* ── Modal (unchanged) ─────────────────────────────────── */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; justify-content: center; align-items: flex-end; z-index: 900; padding: 20px; backdrop-filter: blur(3px); }
+@media (min-width: 600px) { .modal-overlay { align-items: center; } }
+.modal { background: #fff; border-radius: 20px 20px 20px 20px; width: 100%; max-width: 600px; max-height: 88vh; overflow-y: auto; box-shadow: 0 16px 60px rgba(0,0,0,0.25); animation: modalUp 0.28s cubic-bezier(0.22,1,0.36,1); }
+@keyframes modalUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+.modal-header { display: flex; justify-content: space-between; align-items: flex-start; padding: 22px 24px 16px; border-bottom: 1.5px solid #f0f0f0; position: sticky; top: 0; background: #fff; z-index: 1; }
 .modal-header h2 { margin: 0; font-size: 1.15rem; color: #1a1a1a; }
-.modal-close {
-  background: none; border: none;
-  font-size: 1.1rem; color: #aaa;
-  cursor: pointer; padding: 4px 8px;
-  border-radius: 6px; transition: color 0.2s;
-}
+.modal-close { background: none; border: none; font-size: 1.1rem; color: #aaa; cursor: pointer; padding: 4px 8px; border-radius: 6px; transition: color 0.2s; }
 .modal-close:hover { color: #ff4757; }
-
 .modal-body { padding: 20px 24px 28px; }
 .modal-section { margin-bottom: 24px; }
-.modal-section h3 {
-  margin: 0 0 12px;
-  font-size: 0.85rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: #ff4757;
-}
+.modal-section h3 { margin: 0 0 12px; font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #ff4757; }
 .modal-section p { margin: 6px 0; font-size: 0.9rem; color: #444; }
-
-.modal-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 10px;
-  background: #fafafa;
-  border-radius: 8px;
-  margin-bottom: 6px;
-  font-size: 0.88rem;
-  color: #1a1a1a;
-}
+.modal-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: #fafafa; border-radius: 8px; margin-bottom: 6px; font-size: 0.88rem; color: #1a1a1a; }
 .modal-item-left { display: flex; align-items: center; gap: 10px; }
-.modal-item-img {
-  width: 36px; height: 36px;
-  border-radius: 6px; object-fit: cover; background: #eee;
-}
+.modal-item-img { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; background: #eee; }
 .modal-item-price { font-weight: 700; color: #ff4757; }
-
-.summary-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.88rem;
-  color: #555;
-  padding: 4px 0;
-}
-.summary-row.grand-total {
-  border-top: 1.5px solid #ebebeb;
-  margin-top: 8px; padding-top: 10px;
-  font-weight: 700; font-size: 1rem; color: #1a1a1a;
-}
+.summary-row { display: flex; justify-content: space-between; font-size: 0.88rem; color: #555; padding: 4px 0; }
+.summary-row.grand-total { border-top: 1.5px solid #ebebeb; margin-top: 8px; padding-top: 10px; font-weight: 700; font-size: 1rem; color: #1a1a1a; }
 .summary-row.discount { color: #059669; }
 .summary-row.points-earned { color: #d97706; }
-
-.modal-two-col {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}
+.modal-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .pay-paid, .pay-succeeded { color: #059669; font-weight: 600; }
 .pay-pending              { color: #d97706; font-weight: 600; }
 .pay-failed, .pay-cancelled { color: #dc2626; font-weight: 600; }

@@ -1,4 +1,3 @@
-
 import axios from 'axios';
 
 // ---------------------------------------------------------------------------
@@ -83,6 +82,7 @@ apiClient.interceptors.response.use(
     isRefreshing = true;
 
     try {
+      // Note: /auth/token/refresh/ is assumed to exist elsewhere; adjust if needed
       const res = await axios.post(`${API_BASE_URL}/auth/token/refresh/`, {
         refresh: refreshToken,
       });
@@ -110,13 +110,13 @@ apiClient.interceptors.response.use(
 
 // ============================================================================
 // AUTH API
-// Registration ENABLED | getProfile → /auth/customer/profile/
+// Registration ENABLED | getProfile → /auth/profile/
 // ============================================================================
 export const authAPI = {
   // Registration (enabled)
   register: async (payload) => {
     try {
-      const res = await apiClient.post('/auth/customer/register/', payload);
+      const res = await apiClient.post('/auth/register/', payload);
 
       const { access_token, refresh_token } = res.data || {};
 
@@ -133,7 +133,7 @@ export const authAPI = {
   // Login
   login: async (email, password) => {
     try {
-      const response = await apiClient.post('/auth/customer/login/', { email, password });
+      const response = await apiClient.post('/auth/login/', { email, password });
 
       const { access_token, refresh_token } = response.data || {};
       if (access_token) localStorage.setItem('access_token', access_token);
@@ -168,10 +168,10 @@ export const authAPI = {
     localStorage.removeItem('ramyeon_user_session');
   },
 
-  // Profile (kept version)
+  // Profile
   getProfile: async () => {
     try {
-      const res = await apiClient.get('/auth/customer/profile/');
+      const res = await apiClient.get('/auth/profile/');
       return res.data;
     } catch (error) {
       console.error('[API] getProfile error:', error.response?.data);
@@ -203,7 +203,7 @@ export const productsAPI = {
   // Get all products
   getAll: async (params = {}) => {
     try {
-      const response = await apiClient.get('/web/products/', { params });
+      const response = await apiClient.get('/products/', { params });
       return response.data;
     } catch (error) {
       console.error('Failed to fetch products:', error.response?.data);
@@ -214,7 +214,7 @@ export const productsAPI = {
   // Get product by ID
   getById: async (id) => {
     try {
-      const response = await apiClient.get(`/web/products/${id}/`);
+      const response = await apiClient.get(`/products/${id}/`);
       return response.data;
     } catch (error) {
       console.error('Failed to fetch product:', error.response?.data);
@@ -228,7 +228,7 @@ export const productsAPI = {
       const params = { page, limit };
       if (subcategory) params.subcategory_name = subcategory;
 
-      const response = await apiClient.get(`/web/products/category/${categoryId}/`, { params });
+      const response = await apiClient.get(`/products/category/${categoryId}/`, { params });
       return response.data;
     } catch (error) {
       console.error('Failed to fetch products by category:', error.response?.data);
@@ -239,7 +239,7 @@ export const productsAPI = {
   // Search products
   search: async (query) => {
     try {
-      const response = await apiClient.get('/web/products/search/', { params: { q: query } });
+      const response = await apiClient.get('/products/search/', { params: { q: query } });
       return response.data;
     } catch (error) {
       console.error('Failed to search products:', error.response?.data);
@@ -254,7 +254,7 @@ export const productsAPI = {
 export const categoriesAPI = {
   getAll: async () => {
     try {
-      const response = await apiClient.get('/web/categories/');
+      const response = await apiClient.get('/categories/');
       return response.data;
     } catch (error) {
       console.error('Failed to fetch categories:', error.response?.data);
@@ -265,7 +265,7 @@ export const categoriesAPI = {
   // Get category by ID
   getById: async (id) => {
     try {
-      const response = await apiClient.get(`/web/categories/${id}/`);
+      const response = await apiClient.get(`/categories/${id}/`);
       return response.data;
     } catch (error) {
       console.error('Failed to fetch category:', error.response?.data);
@@ -276,7 +276,7 @@ export const categoriesAPI = {
   // Get subcategories (uses category detail endpoint)
   getSubcategories: async (categoryId) => {
     try {
-      const response = await apiClient.get(`/web/categories/${categoryId}/`);
+      const response = await apiClient.get(`/categories/${categoryId}/`);
       return response.data;
     } catch (error) {
       console.error('Failed to fetch subcategories:', error.response?.data);
@@ -307,67 +307,57 @@ export const cartAPI = {
 };
 
 // ============================================================================
-// ORDERS API (ENHANCED)
-// Strict production version for getStatus()
+// ORDERS API (ENHANCED – CORRECTED)
 // ============================================================================
+
+// Payment method mapping (frontend → backend)
+const PAYMENT_METHOD_MAP = {
+  cash: 'cod',
+  gcash: 'gcash_paymongo',
+  card: 'bank_paymongo',
+  grabpay: 'grabpay_paymongo'   // if you add GrabPay later, else remove
+};
+
+function mapPaymentMethod(method) {
+  return PAYMENT_METHOD_MAP[method] || 'cod';
+}
+
 export const ordersAPI = {
 
   // -------------------------------------------------------------------------
-  // Get all orders for current user
+  // Get all orders for a customer (GET /orders/customer/:customerId/)
   // -------------------------------------------------------------------------
-  getAll: async (limit = 50, offset = 0) => {
+  getAll: async (customerId, filters = {}) => {
     try {
-      const userSession = JSON.parse(localStorage.getItem('ramyeon_user_session') || '{}');
-      const customerId = userSession.id; // CUST-00040
-
-      console.log('📦 Loading orders for customer:', customerId);
-
       if (!customerId) {
+        // Fallback to localStorage if no customerId provided
+        const userSession = JSON.parse(localStorage.getItem('ramyeon_user_session') || '{}');
         const userOrdersKey = `ramyeon_orders_${userSession.email || 'guest'}`;
         const orders = JSON.parse(localStorage.getItem(userOrdersKey) || '[]');
         return { success: true, results: orders };
       }
 
-      // Call the backend endpoint
-      const response = await apiClient.get(`/web/orders/customer/${customerId}/`, {
-        params: { limit, offset }
+      const response = await apiClient.get(`/orders/customer/${customerId}/`, {
+        params: filters    // e.g., { status, limit }
       });
 
-      console.log('✅ [ordersAPI.getAll] Raw response.data:', response.data);
-      console.log('✅ [ordersAPI.getAll] Is array?', Array.isArray(response.data));
-      console.log('✅ [ordersAPI.getAll] Type:', typeof response.data);
-      if (response.data && typeof response.data === 'object' && !Array.isArray(response.data)) {
-        console.log('✅ [ordersAPI.getAll] Object keys:', Object.keys(response.data));
-      }
-      if (Array.isArray(response.data) && response.data.length > 0) {
-        console.log('✅ [ordersAPI.getAll] First order sample:', JSON.stringify(response.data[0], null, 2));
-      }
-
-      // The backend returns an ARRAY directly, not {results: array}
-      // So we need to wrap it in the expected format
+      // Backend returns an array directly, wrap in expected format
       return {
         success: true,
-        results: response.data // response.data is the array of orders
+        results: Array.isArray(response.data) ? response.data : (response.data?.results || [])
       };
-
     } catch (error) {
       console.error('❌ Error fetching customer orders:', error);
-      
       // Fallback to localStorage
       const userSession = JSON.parse(localStorage.getItem('ramyeon_user_session') || '{}');
       const userOrdersKey = `ramyeon_orders_${userSession.id || userSession.email || 'guest'}`;
       const fallbackOrders = JSON.parse(localStorage.getItem(userOrdersKey) || '[]');
-      
-      return { 
-        success: false, 
-        results: fallbackOrders, 
-        error: error.message
-      };
+      return { success: false, results: fallbackOrders, error: error.message };
     }
   },
 
   // -------------------------------------------------------------------------
-  // Create new order
+  // Create new order (POST /orders/create/)
   // -------------------------------------------------------------------------
   create: async (orderData) => {
     try {
@@ -378,55 +368,39 @@ export const ordersAPI = {
         items: items.map((item) => ({
           product_id: item.product_id || item.id || item.productId,
           quantity: item.quantity || 1,
-          price: item.price || item.unit_price || 0,
-          product_name: item.name || item.product_name,
         })),
-        delivery_address: orderData?.delivery_address || {},
-        delivery_type: orderData?.delivery_type || 'delivery',
-        payment_method: (orderData?.payment_method || 'cash').toLowerCase(),
-        points_to_redeem: orderData?.points_to_redeem || orderData?.loyalty_points || 0,
-        notes: orderData?.notes || orderData?.special_instructions || '',
-        special_instructions: orderData?.special_instructions || orderData?.notes || '',
+        delivery_address: String(orderData?.delivery_address || orderData?.deliveryAddress || ''),
+        delivery_type: orderData?.delivery_type || orderData?.deliveryType || 'delivery',
+        payment_method: mapPaymentMethod(orderData?.payment_method || orderData?.paymentMethod),
+        points_to_redeem: orderData?.points_to_redeem || orderData?.pointsToRedeem || 0,
+        notes: orderData?.notes || orderData?.special_instructions || orderData?.specialInstructions || '',
       };
 
-      console.log('📤 [ordersAPI.create] Payload being sent to backend:', JSON.stringify(payload, null, 2));
-      console.log('📤 [ordersAPI.create] customer_id in payload:', payload.customer_id);
-      console.log('📤 [ordersAPI.create] item count:', payload.items.length);
+      const response = await apiClient.post('/orders/create/', payload, { timeout: 45000 });
 
-      const response = await apiClient.post('/web/orders/create/', payload, { timeout: 45000 });
-
-      console.log('📥 [ordersAPI.create] Raw response status:', response.status);
-      console.log('📥 [ordersAPI.create] Raw response.data:', JSON.stringify(response.data, null, 2));
-
-      // Backend returns { success: true, data: {...} } or { success: false, error: "..." }
+      // Backend returns { success: true, data: { order_id, order } } or { success: false, error: "..." }
       if (response.data && response.data.success) {
         const orderResult = response.data.data || response.data;
-        console.log('✅ [ordersAPI.create] Order created — transaction_id:', orderResult?.transaction_id || orderResult?.order_id || orderResult?.id);
-        console.log('✅ [ordersAPI.create] customer_id on created order:', orderResult?.order?.customer?.customer_id || orderResult?.customer_id);
-        console.log('✅ [ordersAPI.create] stock deduction: handled async on backend (not in response)');
         return { success: true, data: orderResult };
       } else {
-        console.warn('❌ [ordersAPI.create] Backend returned failure:', response.data);
         return {
           success: false,
           error: response.data?.error || response.data?.message || 'Failed to create order'
         };
       }
-
     } catch (error) {
       const data = error.response?.data;
       const msg = data?.message || data?.error || error.message || 'Failed to create order';
-      
       return { success: false, error: msg };
     }
   },
 
   // -------------------------------------------------------------------------
-  // Get order by ID
+  // Get order by ID (GET /orders/:id/)
   // -------------------------------------------------------------------------
   getById: async (id) => {
     try {
-      const response = await apiClient.get(`/web/orders/${id}/`);
+      const response = await apiClient.get(`/orders/${id}/`);
       return response.data;
     } catch (error) {
       // fallback: localStorage lookup
@@ -436,11 +410,10 @@ export const ordersAPI = {
   },
 
   // -------------------------------------------------------------------------
-  // Get order status (STRICT production version)
+  // Get order status (uses getById as fallback)
   // -------------------------------------------------------------------------
   getStatus: async (orderId) => {
     try {
-      // Validate ID
       if (!orderId || orderId === 'undefined' || orderId === 'null') {
         return { success: false, error: 'Invalid order ID' };
       }
@@ -450,38 +423,35 @@ export const ordersAPI = {
         return { success: false, error: 'Not authenticated' };
       }
 
-      const response = await apiClient.get(`/web/orders/${orderId}/`);
+      const response = await apiClient.get(`/orders/${orderId}/`);
       return { success: true, ...response.data };
-
     } catch (error) {
-      // Expected case: order not found in backend
       if (error.response?.status === 404) {
         return { success: false, error: 'Order not found' };
       }
-
       if (error.response?.status === 403) {
         return { success: false, error: 'Unauthorized access to order' };
       }
-
       if (error.response?.status === 401) {
         return { success: false, error: 'Authentication required' };
       }
-
-      // Network or unexpected
       console.error('❌ Network error during order status:', error.message);
       return { success: false, error: error.message || 'Network error' };
     }
   },
 
   // -------------------------------------------------------------------------
-  // Cancel order (customer-initiated)
+  // Cancel order (POST /orders/:id/cancel/)
   // -------------------------------------------------------------------------
-  cancel: async (orderId, reason = 'Customer cancellation') => {
+  cancel: async (orderId, reason = 'Customer cancellation', customerId = null) => {
     try {
-      const userSession = JSON.parse(localStorage.getItem('ramyeon_user_session') || '{}');
-      const customerId = userSession.id || 'customer';
+      // If no customerId provided, read from session
+      if (!customerId) {
+        const userSession = JSON.parse(localStorage.getItem('ramyeon_user_session') || '{}');
+        customerId = userSession.id || 'customer';
+      }
 
-      const response = await apiClient.post(`/web/orders/${orderId}/cancel/`, {
+      const response = await apiClient.post(`/orders/${orderId}/cancel/`, {
         cancellation_reason: reason,
         customer_id: customerId,
       });
@@ -495,7 +465,7 @@ export const ordersAPI = {
   },
 
   // -------------------------------------------------------------------------
-  // Update order status (POS/Admin)
+  // Update order status (Admin only – keep as is or stub)
   // -------------------------------------------------------------------------
   updateStatus: async (orderId, newStatus, notes = '') => {
     try {
@@ -503,9 +473,7 @@ export const ordersAPI = {
         status: newStatus,
         notes: notes
       });
-
       return { success: true, ...res.data };
-
     } catch (err) {
       return {
         success: false,
@@ -513,7 +481,6 @@ export const ordersAPI = {
       };
     }
   },
-
 };
 
 
@@ -523,7 +490,7 @@ export const ordersAPI = {
 export const loyaltyAPI = {
   getBalance: async () => {
     try {
-      const response = await apiClient.get('/web/loyalty/balance/');
+      const response = await apiClient.get('/loyalty/balance/');
       return { success: true, ...response.data };
     } catch (error) {
       console.error('[LOYALTY] getBalance error:', error);
@@ -533,7 +500,7 @@ export const loyaltyAPI = {
 
   getHistory: async (limit = 50) => {
     try {
-      const response = await apiClient.get('/web/loyalty/history/', { params: { limit } });
+      const response = await apiClient.get('/loyalty/history/', { params: { limit } });
       return { success: true, ...response.data };
     } catch (error) {
       console.error('[LOYALTY] getHistory error:', error);
@@ -543,7 +510,7 @@ export const loyaltyAPI = {
 
   validateRedemption: async (pointsToRedeem) => {
     try {
-      const response = await apiClient.post('/web/loyalty/validate-redemption/', { points_to_redeem: pointsToRedeem });
+      const response = await apiClient.post('/loyalty/validate-redemption/', { points_to_redeem: pointsToRedeem });
       return { success: true, ...response.data };
     } catch (error) {
       console.error('[LOYALTY] validateRedemption error:', error.response?.data || error.message);
@@ -558,7 +525,7 @@ export const loyaltyAPI = {
 
   redeem: async (points, description = 'Points redemption') => {
     try {
-      const response = await apiClient.post('/web/loyalty/redeem/', { points_to_redeem: points, description });
+      const response = await apiClient.post('/loyalty/redeem/', { points_to_redeem: points, description });
       return { success: true, ...response.data };
     } catch (error) {
       const errMsg = error.response?.data?.error || error.message || 'Failed to redeem points';
@@ -569,7 +536,7 @@ export const loyaltyAPI = {
 
   award: async (orderAmount, description = 'Points earned from order') => {
     try {
-      const response = await apiClient.post('/web/loyalty/award/', { order_amount: orderAmount, description });
+      const response = await apiClient.post('/loyalty/award/', { order_amount: orderAmount, description });
       return { success: true, ...response.data };
     } catch (error) {
       console.error('[LOYALTY] award error:', error);
@@ -595,6 +562,7 @@ export const stockAPI = {
         quantity: item.quantity || 1,
         price: item.price || item.unit_price || 0,
       }));
+      // This endpoint may be under /pos/... – adjust if needed
       const response = await apiClient.post('/pos/stock-validation/', { checkout_data });
       return response.data;
     } catch (error) {
@@ -623,6 +591,7 @@ export const promotionsAPI = {
   // Get active promotions
   getActive: async () => {
     try {
+      // Maps to /api/v1/web/promotions/active/
       const response = await apiClient.get('/promotions/active/');
       return response.data;
     } catch (error) {
@@ -634,6 +603,7 @@ export const promotionsAPI = {
   // Apply promotion to cart
   applyPromotion: async (promotionCode, cartItems) => {
     try {
+      // Note: /promotions/apply/ is not yet defined in your web/urls.py; you may need to add it.
       const response = await apiClient.post('/promotions/apply/', {
         promotion_code: promotionCode,
         cart_items: cartItems

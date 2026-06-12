@@ -59,7 +59,6 @@ export function useOnlineOrder() {
     activePromotions,
     appliedPromotions,
     validatePromotion,
-    applyPromotion,
     removePromotion
   } = usePromotions()
   
@@ -68,7 +67,6 @@ export function useOnlineOrder() {
     loyaltyBalance,
     loyaltyHistory,
     currentTier,
-    calculatePointsEarned,
     calculatePointsDiscount,
     validatePointsRedemption
   } = useLoyalty()
@@ -76,8 +74,7 @@ export function useOnlineOrder() {
   const {
     // Products
     products,
-    checkStock,
-    validateStock
+    checkStock
   } = useProducts()
   
   // Helper to persist cart changes to localStorage
@@ -346,51 +343,30 @@ export function useOnlineOrder() {
   // ================================================================
   
   /**
-   * Create new order
-   * @param {Object} orderData - Order data
+   * Create new order – simplified to rely solely on ordersAPI.create()
+   * Backend now handles stock validation, points calculation, etc.
+   * @param {Object} orderData - Order data (with keys: customer_id, items, delivery_address, etc.)
    * @returns {Promise<Object>} Order creation result
    */
   const createOrder = async (orderData) => {
     try {
       isCreating.value = true
       creationError.value = null
-      
-      // Validate stock before creating order (allow fallback to local validation)
-      try {
-        const stockValidation = await validateStock(orderData.items)
-        if (!stockValidation.success) {
-          // Don't throw - allow order to proceed as stock validation has local fallback
-        }
-      } catch {
-        // Don't throw - allow order to proceed as stock validation has local fallback
+
+      // Ensure customer_id is present; fallback to user.id if available
+      if (!orderData.customer_id && orderData.user?.id) {
+        orderData.customer_id = orderData.user.id
       }
 
-      // Apply promotions if any
-      if (orderData.promotions && orderData.promotions.length > 0) {
-        for (const promotionId of orderData.promotions) {
-          await applyPromotion(promotionId, orderData.items, orderData.user)
-        }
-      }
-
-      // Calculate loyalty points earned (backend will calculate this)
-      if (orderData.user && orderData.total_amount) {
-        try {
-          const subtotalAfterDiscount = (orderData.total_amount || 0) - (orderData.discount || 0)
-          const pointsResult = await calculatePointsEarned(subtotalAfterDiscount)
-          orderData.points_earned = (pointsResult?.success)
-            ? (pointsResult.data?.points_earned || pointsResult.data?.points || 0)
-            : 0
-        } catch {
-          orderData.points_earned = 0
-        }
-      }
-
-      // Create order via API
+      // Directly call the API – no extra validation calls
       const result = await ordersAPI.create(orderData)
 
       if (result.success) {
-        orders.value.unshift(result.data)
-        currentOrder.value = result.data
+        // Update local state with the created order
+        // The API returns { data: { order_id, order } } – store the order part
+        const created = result.data.order || result.data
+        orders.value.unshift(created)
+        currentOrder.value = created
         return { success: true, data: result.data }
       } else {
         throw new Error(result.error || 'Order creation failed')
@@ -405,7 +381,7 @@ export function useOnlineOrder() {
   }
   
   /**
-   * Update order
+   * Update order (not available for customers; kept for admin use)
    * @param {string} orderId - Order ID
    * @param {Object} updateData - Update data
    * @returns {Promise<Object>} Update result
@@ -414,7 +390,6 @@ export function useOnlineOrder() {
     try {
       isUpdating.value = true
       updateError.value = null
-      
       
       const result = await ordersAPI.update(orderId, updateData)
       
@@ -443,7 +418,7 @@ export function useOnlineOrder() {
   }
   
   /**
-   * Cancel order
+   * Cancel order – passes customerId from session
    * @param {string} orderId - Order ID
    * @param {string} reason - Cancellation reason
    * @returns {Promise<Object>} Cancellation result
@@ -453,8 +428,11 @@ export function useOnlineOrder() {
       isCancelling.value = true
       cancellationError.value = null
       
+      // Retrieve customer ID from session
+      const userSession = JSON.parse(localStorage.getItem('ramyeon_user_session') || '{}')
+      const customerId = userSession.id || 'customer'
       
-      const result = await ordersAPI.cancel(orderId, reason)
+      const result = await ordersAPI.cancel(orderId, reason, customerId)
       
       if (result.success) {
         // Update local order status

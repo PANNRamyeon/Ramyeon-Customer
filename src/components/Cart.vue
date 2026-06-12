@@ -1382,15 +1382,34 @@ export default {
       });
     },
 
-    // Payment and checkout methods
-    async proceedToCheckout() {
-      if (!this.canCheckout) {
-        return;
-      }
+    // ====================================================================
+    // CHECKOUT: fixed orderData and active order check
+    // ====================================================================
 
-      if (this.isProcessing) {
-        return;
+    async checkActiveOrder() {
+      this.checkingActiveOrder = true;
+      try {
+        if (!this.userProfile?.id) {
+          this.activeOrder = null;
+          return;
+        }
+        const result = await ordersAPI.getAll(this.userProfile.id, { limit: 10 });
+        const orders = result?.results || [];
+        const activeStatuses = new Set(['pending', 'confirmed', 'processing', 'preparing', 'on_the_way']);
+        const found = orders.find(o => activeStatuses.has(o?.order?.status));
+        this.activeOrder = found
+          ? { order_id: found.transaction_id, status: found.order?.status }
+          : null;
+      } catch (err) {
+        console.error('[Cart] checkActiveOrder failed:', err);
+        this.activeOrder = null;
+      } finally {
+        this.checkingActiveOrder = false;
       }
+    },
+
+    async proceedToCheckout() {
+      if (!this.canCheckout || this.isProcessing) return;
 
       try {
         this.isProcessing = true;
@@ -1399,173 +1418,74 @@ export default {
           throw new Error('Please log in to place an order');
         }
 
+        // Build items array with only the fields the backend needs
         const orderItems = this.cartItems.map(item => ({
           product_id: item.product_id || item.id,
           quantity: item.quantity || 1,
-          price: this.getItemDiscountedPrice(item),
-          product_name: item.name || item.product_name,
-          original_price: item.price
         }));
 
-        const subtotal = this.subtotal;
-        const deliveryFee = this.deliveryType === 'delivery' ? this.deliveryFee : 0;
-        const serviceFee = this.serviceFee;
-        const totalDiscount =
-          (this.pointsDiscount || 0) +
-          (this.promotionDiscount || 0);
-        const finalTotal = this.finalTotal;
-
+        // Simple order data matching backend expectations
         const orderData = {
-          user: {
-            id: this.userProfile.id,
-            email: this.userProfile.email,
-            full_name: this.userProfile.full_name
-          },
           customer_id: this.userProfile.id,
           items: orderItems,
-          delivery_address: this.deliveryType === 'delivery'
-            ? { address: this.deliveryAddress, type: 'delivery' }
-            : {},
+          delivery_address: this.deliveryType === 'delivery' ? this.deliveryAddress : '',
           delivery_type: this.deliveryType,
-          payment_method: this.paymentMethod,
-          subtotal,
-          delivery_fee: deliveryFee,
-          service_fee: serviceFee,
-          discount: totalDiscount,
-          total_amount: finalTotal,
+          payment_method: this.paymentMethod,   // will be mapped in ordersAPI.create
           points_to_redeem: this.useLoyaltyPoints ? parseInt(this.pointsToRedeem) || 0 : 0,
-          loyalty_points: this.useLoyaltyPoints ? parseInt(this.pointsToRedeem) || 0 : 0,
-          special_instructions: this.specialInstructions || '',
-          notes: this.specialInstructions || '',
-          promotion_id: this.appliedPromotion?.id || this.appliedPromotion?._id || null
+          notes: this.specialInstructions || ''
         };
 
-        console.log('📦 [Cart] Order data prepared:', JSON.stringify(orderData, null, 2));
-        console.log('📦 [Cart] customer_id:', orderData.customer_id);
-        console.log('📦 [Cart] items count:', orderData.items.length);
-        console.log('📦 [Cart] payment_method:', orderData.payment_method);
-        console.log('📦 [Cart] delivery_type:', orderData.delivery_type);
-        console.log('📦 [Cart] total_amount:', orderData.total_amount);
-        console.log('📦 [Cart] points_to_redeem:', orderData.points_to_redeem);
+        // All payment methods go through the same createOrder flow
+        const result = await this.createOrder(orderData);
 
-        if (this.paymentMethod === 'cash') {
-          const result = await this.createOrder(orderData);
-          console.log('📥 [Cart] createOrder result (cash):', JSON.stringify(result, null, 2));
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to create order');
+        }
 
-          if (result.success) {
-            const orderId = result.data.id || result.data.order_id || result.data.transaction_id;
-            console.log('✅ [Cart] Order placed — orderId:', orderId);
-            this.confirmedOrder = {
-              id: orderId,
-              total: finalTotal.toFixed(2),
-              paymentMethod: this.paymentMethod,
-              deliveryType: this.deliveryType,
-              pointsEarned: result.data.order?.loyalty?.points_earned || 0,
-              pointsUsed: orderData.points_to_redeem || 0
-            };
-            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
-            this.clearCart();
-            localStorage.removeItem('ramyeon_cart');
-            this.$emit('cartCleared');
-            this.showOrderConfirmation = true;
-          } else {
-            throw new Error(result.error || 'Failed to create order');
+        // Extract order ID from result (handles different response shapes)
+        const orderId =
+          result.data?.order_id ||
+          result.data?.order?.order_id ||
+          result.data?.id ||
+          result.data?.transaction_id ||
+          result.data?.order?._id;
+
+        console.log('✅ [Cart] Order placed — orderId:', orderId);
+
+        // For online payment methods, redirect to payment gateway
+        if (['gcash', 'card', 'grabpay'].includes(this.paymentMethod)) {
+          window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
+          this.savePendingOrder(orderId, this.finalTotal);
+
+          let paymentSource;
+          if (this.paymentMethod === 'gcash') {
+            paymentSource = await this.processGCashPayment(orderId);
+          } else if (this.paymentMethod === 'card') {
+            paymentSource = await this.processCardPayment(orderId);
+          } else if (this.paymentMethod === 'grabpay') {
+            paymentSource = await this.processGrabPayPayment(orderId);
           }
-        } else if (this.paymentMethod === 'gcash') {
-          const result = await this.createOrder(orderData);
-          console.log('📥 [Cart] createOrder result (gcash):', JSON.stringify(result, null, 2));
 
-          if (result.success) {
-            const orderId =
-              result.data?.order_id ||
-              result.data?.order?.order_id ||
-              result.data?.id ||
-              result.data?.transaction_id ||
-              result.data?.order?._id;
-            console.log('✅ [Cart] Order placed (gcash) — orderId:', orderId);
-
-            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
-            this.savePendingOrder(orderId, finalTotal);
-            const paymentSource = await this.processGCashPayment(orderId);
-
-            if (paymentSource && paymentSource.checkout_url) {
-              window.location.href = paymentSource.checkout_url;
-            } else {
-              throw new Error('Failed to initialize GCash payment');
-            }
+          if (paymentSource && paymentSource.checkout_url) {
+            window.location.href = paymentSource.checkout_url;
           } else {
-            throw new Error(result.error || 'Failed to create order');
-          }
-        } else if (this.paymentMethod === 'card') {
-          const result = await this.createOrder(orderData);
-          console.log('📥 [Cart] createOrder result (card):', JSON.stringify(result, null, 2));
-
-          if (result.success) {
-            const orderId =
-              result.data?.order_id ||
-              result.data?.order?.order_id ||
-              result.data?.id ||
-              result.data?.transaction_id ||
-              result.data?.order?._id;
-            console.log('✅ [Cart] Order placed (card) — orderId:', orderId);
-
-            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
-            this.savePendingOrder(orderId, finalTotal);
-            const paymentSource = await this.processCardPayment(orderId);
-
-            if (paymentSource && paymentSource.checkout_url) {
-              window.location.href = paymentSource.checkout_url;
-            } else {
-              throw new Error('Failed to initialize card payment');
-            }
-          } else {
-            throw new Error(result.error || 'Failed to create order');
-          }
-        } else if (this.paymentMethod === 'grabpay') {
-          const result = await this.createOrder(orderData);
-          console.log('📥 [Cart] createOrder result (grabpay):', JSON.stringify(result, null, 2));
-
-          if (result.success) {
-            const orderId =
-              result.data?.order_id ||
-              result.data?.order?.order_id ||
-              result.data?.id ||
-              result.data?.transaction_id ||
-              result.data?.order?._id;
-            console.log('✅ [Cart] Order placed (grabpay) — orderId:', orderId);
-
-            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
-            this.savePendingOrder(orderId, finalTotal);
-            const paymentSource = await this.processGrabPayPayment(orderId);
-
-            if (paymentSource && paymentSource.checkout_url) {
-              window.location.href = paymentSource.checkout_url;
-            } else {
-              throw new Error('Failed to initialize GrabPay payment');
-            }
-          } else {
-            throw new Error(result.error || 'Failed to create order');
+            throw new Error('Failed to initialize payment');
           }
         } else {
-          const result = await this.createOrder(orderData);
-
-          if (result.success) {
-            const orderId = result.data.id || result.data.order_id || result.data.order?.order_id;
-            this.confirmedOrder = {
-              id: orderId,
-              total: finalTotal.toFixed(2),
-              paymentMethod: this.paymentMethod,
-              deliveryType: this.deliveryType,
-              pointsEarned: result.data.order?.loyalty?.points_earned || 0,
-              pointsUsed: orderData.points_to_redeem || 0
-            };
-            window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
-            this.clearCart();
-            localStorage.removeItem('ramyeon_cart');
-            this.showOrderConfirmation = true;
-          } else {
-            throw new Error(result.error || 'Failed to create order');
-          }
+          // Cash on delivery – show confirmation immediately
+          this.confirmedOrder = {
+            id: orderId,
+            total: this.finalTotal.toFixed(2),
+            paymentMethod: this.paymentMethod,
+            deliveryType: this.deliveryType,
+            pointsEarned: result.data?.order?.loyalty?.points_earned || 0,
+            pointsUsed: orderData.points_to_redeem || 0
+          };
+          window.dispatchEvent(new CustomEvent('order-placed', { detail: { orderId } }));
+          this.clearCart();
+          localStorage.removeItem('ramyeon_cart');
+          this.$emit('cartCleared');
+          this.showOrderConfirmation = true;
         }
       } catch (error) {
         console.error('❌ Checkout error:', error);
@@ -1713,24 +1633,6 @@ export default {
       this.$emit('setCurrentPage', 'Home');
     },
     
-    async checkActiveOrder() {
-      this.checkingActiveOrder = true;
-      try {
-        const result = await ordersAPI.getAll(10);
-        const orders = result?.results || [];
-        const activeStatuses = new Set(['pending', 'confirmed', 'processing', 'preparing', 'on_the_way']);
-        const found = orders.find(o => activeStatuses.has(o?.order?.status));
-        this.activeOrder = found
-          ? { order_id: found.transaction_id, status: found.order?.status }
-          : null;
-      } catch (err) {
-        console.error('[Cart] checkActiveOrder failed:', err);
-        this.activeOrder = null;
-      } finally {
-        this.checkingActiveOrder = false;
-      }
-    },
-
     async loadUserProfile() {
       try {
         this.isUserLoading = true;
@@ -1846,6 +1748,9 @@ export default {
 
 
 <style scoped>
+/* ================================================================
+   CART PAGE – BASE STYLES
+   ================================================================ */
 .cart-page {
   min-height: 100vh;
   background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
@@ -1886,6 +1791,9 @@ export default {
   align-items: start;
 }
 
+/* ---------------------------------------------------------------
+   CART ITEMS
+   --------------------------------------------------------------- */
 .cart-items {
   background: white;
   border-radius: 20px;
@@ -2044,12 +1952,6 @@ export default {
   text-align: center;
 }
 
-.item-total {
-  font-weight: 700;
-  font-size: 1.2rem;
-  color: #333;
-}
-
 .remove-btn {
   width: 30px;
   height: 30px;
@@ -2067,6 +1969,9 @@ export default {
   transform: scale(1.1);
 }
 
+/* ---------------------------------------------------------------
+   ORDER SUMMARY
+   --------------------------------------------------------------- */
 .order-summary {
   background: white;
   border-radius: 20px;
@@ -2110,7 +2015,9 @@ export default {
   font-weight: 700;
 }
 
-/* Promo Code Section */
+/* ---------------------------------------------------------------
+   PROMO CODE
+   --------------------------------------------------------------- */
 .promo-code-section {
   margin: 20px 0;
   padding: 15px 0;
@@ -2248,15 +2155,14 @@ export default {
   font-size: 1.2rem;
 }
 
-/* Loyalty Points Section */
+/* ---------------------------------------------------------------
+   LOYALTY POINTS
+   --------------------------------------------------------------- */
 .loyalty-points-section {
   margin: 20px 0;
-  padding: 15px 0;
-  border-top: 1px solid #eee;
-  border-bottom: 1px solid #eee;
+  padding: 20px;
   background: linear-gradient(135deg, #fff8e1, #ffecb3);
   border-radius: 10px;
-  padding: 20px;
 }
 
 .points-header {
@@ -2335,9 +2241,14 @@ export default {
   border-radius: 10px;
   font-size: 0.95rem;
   font-family: 'Poppins', sans-serif;
-  transition: all 0.3s ease;
   background: white;
   min-width: 120px;
+}
+
+.points-input:focus {
+  outline: none;
+  border-color: #ff9800;
+  box-shadow: 0 0 0 3px rgba(255, 152, 0, 0.1);
 }
 
 .quick-select-points {
@@ -2354,30 +2265,17 @@ export default {
   font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
   font-family: 'Poppins', sans-serif;
 }
 
 .quick-btn:hover {
   background: linear-gradient(135deg, #fb8c00, #ef6c00);
   transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(255, 152, 0, 0.3);
-}
-
-.quick-btn:active {
-  transform: translateY(0);
-}
-
-.points-input:focus {
-  outline: none;
-  border-color: #ff9800;
-  box-shadow: 0 0 0 3px rgba(255, 152, 0, 0.1);
 }
 
 .points-discount {
   font-weight: 700;
   color: #e65100;
-  font-size: 1rem;
   background: #fff3e0;
   padding: 8px 12px;
   border-radius: 8px;
@@ -2437,6 +2335,9 @@ export default {
   font-size: 0.8rem;
 }
 
+/* ---------------------------------------------------------------
+   DELIVERY / PAYMENT / INSTRUCTIONS SECTIONS
+   --------------------------------------------------------------- */
 .delivery-options,
 .payment-methods,
 .special-instructions {
@@ -2642,6 +2543,9 @@ export default {
   box-shadow: 0 0 0 3px rgba(255, 71, 87, 0.1);
 }
 
+/* ---------------------------------------------------------------
+   ACTIVE ORDER WARNING
+   --------------------------------------------------------------- */
 .active-order-warning {
   display: flex;
   align-items: flex-start;
@@ -2656,7 +2560,6 @@ export default {
 .active-order-warning .warning-icon {
   font-size: 1.4rem;
   flex-shrink: 0;
-  line-height: 1.4;
 }
 
 .active-order-warning .warning-content strong {
@@ -2670,7 +2573,6 @@ export default {
   margin: 0;
   color: #78350f;
   font-size: 0.85rem;
-  line-height: 1.5;
 }
 
 .warning-order-id {
@@ -2683,6 +2585,9 @@ export default {
   text-transform: capitalize;
 }
 
+/* ---------------------------------------------------------------
+   CHECKOUT BUTTON
+   --------------------------------------------------------------- */
 .checkout-section {
   background: white;
   border-radius: 20px;
@@ -2714,7 +2619,6 @@ export default {
 .checkout-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-  transform: none;
 }
 
 .loading-spinner {
@@ -2734,6 +2638,9 @@ export default {
   }
 }
 
+/* ---------------------------------------------------------------
+   EMPTY CART
+   --------------------------------------------------------------- */
 .empty-cart {
   text-align: center;
   padding: 60px 20px;
@@ -2778,12 +2685,212 @@ export default {
   box-shadow: 0 10px 25px rgba(255, 71, 87, 0.3);
 }
 
-/* Responsive Design */
+/* ---------------------------------------------------------------
+   VOUCHER SUMMARY
+   --------------------------------------------------------------- */
+.applied-voucher-summary {
+  background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
+  border: 2px solid #28a745;
+  border-radius: 12px;
+  padding: 15px;
+  margin: 15px 0;
+  animation: fadeIn 0.4s ease-out;
+}
+
+.voucher-info-row {
+  margin-bottom: 12px;
+}
+
+.voucher-details {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.voucher-icon {
+  font-size: 1.5rem;
+  animation: pulse 2s infinite;
+}
+
+.voucher-name {
+  font-weight: 700;
+  color: #2e7d32;
+  font-size: 1rem;
+  margin-bottom: 4px;
+}
+
+.voucher-description {
+  font-size: 0.85rem;
+  color: #1b5e20;
+  font-weight: 500;
+}
+
+.applied-voucher-summary .summary-row {
+  margin-bottom: 0;
+  padding-top: 10px;
+  border-top: 1px solid rgba(46, 125, 50, 0.2);
+}
+
+.applied-voucher-summary .discount-amount {
+  font-size: 1.1rem;
+}
+
+/* ---------------------------------------------------------------
+   CONFIRMATION MODAL – FULLY RESPONSIVE
+   --------------------------------------------------------------- */
+.confirmation-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2147483647;
+  padding: 20px;
+}
+
+.confirmation-modal {
+  background: white;
+  border-radius: 25px;
+  max-width: 500px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: clamp(30px, 8vw, 50px) clamp(20px, 6vw, 40px);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  text-align: center;
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Smooth scrollbar for modal */
+.confirmation-modal::-webkit-scrollbar {
+  width: 6px;
+}
+.confirmation-modal::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 10px;
+}
+
+.confirmation-success-icon {
+  margin-bottom: clamp(20px, 5vw, 30px);
+}
+
+.checkmark-circle {
+  width: clamp(70px, 15vw, 100px);
+  height: clamp(70px, 15vw, 100px);
+  background: linear-gradient(135deg, #4caf50, #66bb6a);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  animation: scaleIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
+}
+
+.checkmark {
+  width: clamp(30px, 6vw, 40px);
+  height: clamp(50px, 10vw, 70px);
+  border: solid white;
+  border-width: 0 6px 6px 0;
+  transform: rotate(45deg);
+}
+
+.confirmation-title {
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  font-weight: 700;
+  margin-bottom: 25px;
+}
+
+.confirmation-details {
+  background: #f8f9fa;
+  border-radius: 15px;
+  padding: clamp(15px, 4vw, 25px);
+  margin-bottom: 20px;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  border-bottom: 1px solid #dee2e6;
+  gap: 8px;
+}
+
+.detail-row:last-child {
+  border-bottom: none;
+}
+
+.detail-label {
+  font-weight: 600;
+  color: #666;
+  font-size: clamp(0.85rem, 2vw, 0.95rem);
+}
+
+.detail-value {
+  font-weight: 600;
+  color: #333;
+  font-size: clamp(0.85rem, 2.5vw, 1rem);
+  word-break: break-word;
+  text-align: right;
+}
+
+.order-id .order-id-text {
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.confirmation-message {
+  background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
+  border-radius: 12px;
+  padding: clamp(15px, 3vw, 20px);
+  margin-bottom: 25px;
+}
+
+.confirmation-message p {
+  margin: 6px 0;
+  font-size: clamp(0.9rem, 2vw, 1rem);
+}
+
+.confirmation-btn {
+  width: 100%;
+  padding: clamp(14px, 3vw, 18px);
+  background: linear-gradient(135deg, #ff4757, #ff3742);
+  color: white;
+  border: none;
+  border-radius: 15px;
+  font-size: clamp(1rem, 3vw, 1.1rem);
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.confirmation-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(255, 71, 87, 0.4);
+}
+
+/* animations */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(40px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes scaleIn {
+  from { transform: scale(0); }
+  to { transform: scale(1); }
+}
+
+/* ---------------------------------------------------------------
+   RESPONSIVE BREAKPOINTS
+   --------------------------------------------------------------- */
 @media (max-width: 992px) {
   .cart-content {
     grid-template-columns: 1fr;
   }
-  
   .order-summary {
     position: static;
   }
@@ -2794,12 +2901,10 @@ export default {
     grid-template-columns: 60px 1fr;
     gap: 10px;
   }
-  
   .item-image {
     width: 60px;
     height: 60px;
   }
-  
   .item-controls,
   .item-total,
   .remove-btn {
@@ -2807,11 +2912,9 @@ export default {
     justify-self: end;
     margin-top: 10px;
   }
-  
   .payment-options {
     grid-template-columns: 1fr;
   }
-  
   .address-input {
     flex-direction: column;
   }
@@ -2821,11 +2924,9 @@ export default {
   .cart-page {
     padding: 10px;
   }
-  
   .cart-header h1 {
     font-size: 2rem;
   }
-  
   .cart-items,
   .order-summary,
   .delivery-options,
@@ -2833,222 +2934,6 @@ export default {
   .special-instructions,
   .checkout-section {
     padding: 20px;
-  }
-}
-
-/* Modal Fade Transition */
-.modal-fade-enter-active,
-.modal-fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.modal-fade-enter-from,
-.modal-fade-leave-to {
-  opacity: 0;
-}
-
-/* Order Confirmation Modal - GLOBAL STYLES (via teleport) */
-/* Remove scoped to make this work at body level */
-
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.confirmation-modal {
-  background: white !important;
-  border-radius: 25px;
-  padding: 50px 40px;
-  max-width: 500px;
-  width: 90%;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  text-align: center;
-  position: relative;
-  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-  z-index: 1000000 !important;
-  pointer-events: auto !important;
-}
-
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(50px) scale(0.9);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.confirmation-success-icon {
-  margin-bottom: 30px;
-}
-
-.checkmark-circle {
-  width: 100px;
-  height: 100px;
-  background: linear-gradient(135deg, #4caf50, #66bb6a);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto;
-  animation: scaleIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
-  box-shadow: 0 10px 30px rgba(76, 175, 80, 0.4);
-}
-
-@keyframes scaleIn {
-  from { transform: scale(0); }
-  to { transform: scale(1); }
-}
-
-.checkmark {
-  width: 40px;
-  height: 70px;
-  border: solid white;
-  border-width: 0 6px 6px 0;
-  transform: rotate(45deg);
-  animation: drawCheck 0.5s ease-out 0.5s both;
-}
-
-@keyframes drawCheck {
-  from {
-    height: 0;
-    width: 0;
-  }
-  to {
-    height: 70px;
-    width: 40px;
-  }
-}
-
-.confirmation-title {
-  font-size: 2rem;
-  font-weight: 700;
-  color: #333;
-  margin-bottom: 30px;
-  animation: fadeInUp 0.5s ease-out 0.3s both;
-}
-
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.confirmation-details {
-  background: #f8f9fa;
-  border-radius: 15px;
-  padding: 25px;
-  margin-bottom: 25px;
-  animation: fadeInUp 0.5s ease-out 0.4s both;
-}
-
-.detail-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 0;
-  border-bottom: 1px solid #dee2e6;
-}
-
-.detail-row:last-child {
-  border-bottom: none;
-}
-
-.detail-row.estimated-time {
-  margin-top: 10px;
-  padding-top: 20px;
-  border-top: 2px solid #ff4757;
-}
-
-.detail-label {
-  font-weight: 600;
-  color: #666;
-  font-size: 0.95rem;
-}
-
-.detail-value {
-  font-weight: 600;
-  color: #333;
-  font-size: 1rem;
-}
-
-.detail-value.order-id {
-  color: #ff4757;
-  font-family: monospace;
-  font-size: 0.9rem;
-  background: #fff;
-  padding: 5px 10px;
-  border-radius: 8px;
-}
-
-.detail-value.total-amount {
-  color: #4caf50;
-  font-size: 1.3rem;
-  font-weight: 700;
-}
-
-.confirmation-message {
-  background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 30px;
-  animation: fadeInUp 0.5s ease-out 0.5s both;
-}
-
-.confirmation-message p {
-  margin: 8px 0;
-  color: #2e7d32;
-  font-weight: 600;
-  font-size: 1rem;
-}
-
-.confirmation-btn {
-  width: 100%;
-  padding: 18px;
-  background: linear-gradient(135deg, #ff4757, #ff3742);
-  color: white;
-  border: none;
-  border-radius: 15px;
-  font-size: 1.1rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  animation: fadeInUp 0.5s ease-out 0.6s both;
-}
-
-.confirmation-btn:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 15px 35px rgba(255, 71, 87, 0.4);
-}
-
-/* Responsive for modal */
-@media (max-width: 480px) {
-  .confirmation-modal {
-    padding: 40px 25px;
-  }
-  
-  .confirmation-title {
-    font-size: 1.6rem;
-  }
-  
-  .checkmark-circle {
-    width: 80px;
-    height: 80px;
-  }
-  
-  .checkmark {
-    width: 30px;
-    height: 50px;
   }
 }
 </style>
